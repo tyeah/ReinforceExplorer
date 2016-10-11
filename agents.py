@@ -5,6 +5,14 @@ from estimators import Estimator
 from collections import deque
 import os
 
+
+def init_agent(agent_name):
+    agents = {
+            'naive': Agent,
+            'policy_gradient': PGAgent
+            }
+    return agents[agent_name]
+
 class Agent(object):
     '''
     need to keep track on the experiences and decide when to update
@@ -12,7 +20,7 @@ class Agent(object):
     e.g., inner state could be the hidden state of an RNN, and in this case
     the outer state is the input to the inner state
     '''
-    def __init__(self, observation_dims, action_dim, eps_end=None):
+    def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
         '''
         eps_end should be a function of reward (and state), which is 
         specific to each environment, returning True if
@@ -24,6 +32,8 @@ class Agent(object):
         self.observation_dims = observation_dims
         self.action_dim = action_dim
         self.eps_end = eps_end
+        self.learning = learning
+        self.config = config
 
     def init_state(self, state):
         self.inner_state = InnerState(state)
@@ -50,48 +60,52 @@ class Agent(object):
         optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
                 decay=0.9, epsilon=1e-5)
         tvars = tf.trainable_variables()
-        if self.clip_norm <= 0:
+        if self.config["clip_norm"] <= 0:
             grads = tf.gradients(self.loss, tvars)
         else:
-            grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.clip_norm)
+            grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.config["clip_norm"])
         self.train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
 class PGAgent(Agent):
     '''
     Policy Gradient
     '''
-    def __init__(self, observation_dims, action_dim, eps_end=None):
-        super(PGAgent, self).__init__(observation_dims, action_dim, eps_end)
-        self.discount_rate = 0.99
-        #max_gradient=5,
-        self.reg_param = 1e-2
-        self.init_learning_rate = 1e-3
-        self.init_exp_rate = 0.5
-        self.anneal_step_exp = 10000
-        self.anneal_step_lr = 10000
-        self.anneal_base_exp = 0.5
-        self.anneal_base_lr = 0.5
-        self.min_lr = 1e-5
-        self.clip_norm = -1
-        self.store_eps = 4
-        self.store_size = 100
-        self.batch_size = 100
-        self.eps_counter = 0
-        self.save_step = 10000
-        self.save_file = 'pg_save.ckpt'
+    def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
+        super(PGAgent, self).__init__(observation_dims, action_dim, config, eps_end, learning)
+        '''
+        self.config["discount_rate"] = 0.99
+        self.config["reg_param"] = 1e-2
+        self.config["init_learning_rate"] = 1e-2
+        self.config["init_exp_rate"] = 0.5
+        self.config["anneal_step_exp"] = 1000
+        self.config["anneal_step_lr"] = 10000
+        self.config["anneal_base_exp"] = 0.5
+        self.config["anneal_base_lr"] = 0.5
+        self.config["min_lr"] = 1e-5
+        self.config["clip_norm"] = 5
+        self.config["store_eps"] = 4
+        self.config["store_size"] = 100
+        self.config["batch_size"] = 100
+        self.config["save_step"] = 10000
+        self.config["save_dir"] = 'weights/pg'
+        #weights = os.path.abspath('.') + '/pg_save.ckpt'
         weights = None
+        '''
+        
+        self.eps_counter = 0
+        self.save_file = os.path.join(self.config["save_dir"], 'save.ckpt')
 
         self.reward_queue = deque(maxlen=100)
-        if self.store_eps is not None:
-            self.cond = lambda: np.sum(self.rollouts['eps_end_masks']) >= self.store_eps
-        elif self.store_size is not None:
-            self.cond = lambda: len(self.rollouts['rewards']) >= self.store_size
+        if self.config["store_eps"] is not None:
+            self.cond = lambda: np.sum(self.rollouts['eps_end_masks']) >= self.config["store_eps"]
+        elif self.config["store_size"] is not None:
+            self.cond = lambda: len(self.rollouts['rewards']) >= self.config["store_size"]
         self.reset_buffer()
         self.sess = tf.Session()
         self.build_model()
         self.saver = tf.train.Saver()
-        if weights is not None:
-            self.saver.restore(self.sess, weights)
+        if self.config["weights"] is not None:
+            self.saver.restore(self.sess, self.config["weights"])
         else:
             self.sess.run(tf.initialize_all_variables())
 
@@ -104,10 +118,10 @@ class PGAgent(Agent):
         random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.exp_rate = self.init_exp_rate * (self.anneal_base_exp ** 
-                tf.cast(tf.floordiv(self.global_step, self.anneal_step_exp), tf.float32))
-        self.learning_rate = tf.maximum(self.init_learning_rate * (self.anneal_base_lr ** 
-                tf.cast(tf.floordiv(self.global_step, self.anneal_step_lr), tf.float32)), self.min_lr)
+        self.exp_rate = self.config["init_exp_rate"] * (self.config["anneal_base_exp"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_exp"]), tf.float32))
+        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * (self.config["anneal_base_lr"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), tf.float32)), self.config["min_lr"])
 
         self.action_scores = Estimator('cnn').get_estimator(
                 inputs=self.t_state, num_out=self.action_dim, 
@@ -126,7 +140,7 @@ class PGAgent(Agent):
                 self.action_scores, self.t_action) * self.t_discounted_reward)
 
         self.reg_loss = tf.reduce_mean([tf.nn.l2_loss(v) for v in policy_network_variables])
-        self.loss = self.reinforce_loss + self.reg_param * self.reg_loss
+        self.loss = self.reinforce_loss + self.config["reg_param"] * self.reg_loss
         self.build_train()
 
     def reset_buffer(self):
@@ -165,16 +179,17 @@ class PGAgent(Agent):
 
         if self.cond():
             self.eps_counter += np.sum(self.rollouts['eps_end_masks'])
-            self.update()
+            if self.learning:
+                self.update()
             self.reset_buffer()
         return 0
 
     def gen_feed(self, discounted_reward):
-        num_batches = int(len(self.rollouts['rewards']) // self.batch_size)
-        res = (len(self.rollouts['rewards']) % self.batch_size) > 0
+        num_batches = int(len(self.rollouts['rewards']) // self.config["batch_size"])
+        res = (len(self.rollouts['rewards']) % self.config["batch_size"]) > 0
         for i in xrange( num_batches + res):
-            feed = dict([(s_t, s[i:(i+self.batch_size)]) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
-                    [(self.t_discounted_reward, discounted_reward[i:(i+self.batch_size)]), (self.t_action, self.rollouts['actions'][i:(i+self.batch_size)])])
+            feed = dict([(s_t, s[i:(i+self.config["batch_size"])]) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
+                    [(self.t_discounted_reward, discounted_reward[i:(i+self.config["batch_size"])]), (self.t_action, self.rollouts['actions'][i:(i+self.config["batch_size"])])])
             yield feed
 
 
@@ -184,7 +199,7 @@ class PGAgent(Agent):
         for i in reversed(xrange(0, len(self.rollouts['rewards']))):
             if self.rollouts['eps_end_masks'][i]:
                 dr = 0
-            dr = dr * self.discount_rate + self.rollouts['rewards'][i]
+            dr = dr * self.config["discount_rate"] + self.rollouts['rewards'][i]
             discounted_reward[i] = dr
         self.reward_queue.append(np.mean(discounted_reward))
         feeds = self.gen_feed(discounted_reward)
@@ -193,5 +208,5 @@ class PGAgent(Agent):
         reward_array = np.array(self.rollouts['rewards'])
         #print('avg reward: %f' % np.mean(reward_array[reward_array != 0]))
         print('after episode %d, avg reward: %10.7f, accumulated avg reward: %f, successes: %d' % (self.eps_counter, np.mean(discounted_reward), np.mean(self.reward_queue), np.sum(reward_array > 0)))
-        if self.eps_counter % self.save_step:
-            self.saver.save(self.sess, os.path.abspath('.') + '/' + self.save_file)
+        if self.eps_counter % self.config["save_step"]:
+            self.saver.save(self.sess, self.save_file)
