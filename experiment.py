@@ -1,7 +1,9 @@
-import gym
+import gym, os
 import numpy as np
 import agents
 from worlds import init_world
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 config = {
         'env': 'Pong-v0',

@@ -38,3 +38,18 @@ class PongWorld(GymWorld):
         def ee(reward, state=None):
             return reward != 0
         return ee
+
+    def preproc(self, I):
+        I = I[35:195][::2, ::2]
+        I[I == 144] = 0
+        I[I == 109] = 0
+        I[I != 0] = 1
+        return I.astype(np.float).ravel()
+
+    def reset():
+        state = self.env.reset()
+        return self.preproc(state)
+
+    def step(self, action):
+        state, reward, done, z = env.step(action)
+        return self.preproc(state), reward, done, z

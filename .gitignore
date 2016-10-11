@@ -1,0 +1,5 @@
+weights
+*.pyc
+*.sw*
+*.ckpt*
+*checkpoint

@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 from inner_states import InnerState
 from estimators import Estimator
+from collections import deque
+import os
 
 class Agent(object):
     '''
@@ -63,17 +65,23 @@ class PGAgent(Agent):
         self.discount_rate = 0.99
         #max_gradient=5,
         self.reg_param = 1e-2
-        self.init_learning_rate = 1e-1
+        self.init_learning_rate = 1e-3
         self.init_exp_rate = 0.5
-        self.anneal_step_exp = 1000
-        self.anneal_step_lr = 1000
+        self.anneal_step_exp = 10000
+        self.anneal_step_lr = 10000
         self.anneal_base_exp = 0.5
         self.anneal_base_lr = 0.5
         self.min_lr = 1e-5
         self.clip_norm = -1
-        self.store_eps = 2
+        self.store_eps = 4
         self.store_size = 100
+        self.batch_size = 100
+        self.eps_counter = 0
+        self.save_step = 10000
+        self.save_file = 'pg_save.ckpt'
+        weights = None
 
+        self.reward_queue = deque(maxlen=100)
         if self.store_eps is not None:
             self.cond = lambda: np.sum(self.rollouts['eps_end_masks']) >= self.store_eps
         elif self.store_size is not None:
@@ -81,7 +89,11 @@ class PGAgent(Agent):
         self.reset_buffer()
         self.sess = tf.Session()
         self.build_model()
-        self.sess.run(tf.initialize_all_variables())
+        self.saver = tf.train.Saver()
+        if weights is not None:
+            self.saver.restore(self.sess, weights)
+        else:
+            self.sess.run(tf.initialize_all_variables())
 
     def build_model(self):
         # TODO: should we set exp rate as a placeholder?
@@ -99,7 +111,7 @@ class PGAgent(Agent):
 
         self.action_scores = Estimator('cnn').get_estimator(
                 inputs=self.t_state, num_out=self.action_dim, 
-                num_layers=3,
+                num_cnn_layers=5, num_fc_layers=2,
                 reuse=False, trainable=True, scope='policy_network')
         policy_network_variables = tf.get_collection(
                 tf.GraphKeys.TRAINABLE_VARIABLES, scope="policy_network")
@@ -152,21 +164,34 @@ class PGAgent(Agent):
         # TODO: ansemble states, discounti rewards, actions, do update
 
         if self.cond():
+            self.eps_counter += np.sum(self.rollouts['eps_end_masks'])
             self.update()
             self.reset_buffer()
         return 0
+
+    def gen_feed(self, discounted_reward):
+        num_batches = int(len(self.rollouts['rewards']) // self.batch_size)
+        res = (len(self.rollouts['rewards']) % self.batch_size) > 0
+        for i in xrange( num_batches + res):
+            feed = dict([(s_t, s[i:(i+self.batch_size)]) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
+                    [(self.t_discounted_reward, discounted_reward[i:(i+self.batch_size)]), (self.t_action, self.rollouts['actions'][i:(i+self.batch_size)])])
+            yield feed
+
 
     def update(self):
         # learn from experiences
         discounted_reward = np.zeros_like(self.rollouts['rewards'])
         for i in reversed(xrange(0, len(self.rollouts['rewards']))):
             if self.rollouts['eps_end_masks'][i]:
-                dr = 1
-            else:
-                dr *= self.discount_rate
+                dr = 0
+            dr = dr * self.discount_rate + self.rollouts['rewards'][i]
             discounted_reward[i] = dr
-        feed = dict([(s_t, s) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
-                [(self.t_discounted_reward, discounted_reward), (self.t_action, self.rollouts['actions'])])
-        _ = self.sess.run(self.train_op, feed_dict=feed)
+        self.reward_queue.append(np.mean(discounted_reward))
+        feeds = self.gen_feed(discounted_reward)
+        for feed in feeds: 
+            _ = self.sess.run([self.global_step, self.train_op], feed_dict=feed)
         reward_array = np.array(self.rollouts['rewards'])
-        print('avg reward: %f' % np.mean(reward_array[reward_array != 0]))
+        #print('avg reward: %f' % np.mean(reward_array[reward_array != 0]))
+        print('after episode %d, avg reward: %10.7f, accumulated avg reward: %f, successes: %d' % (self.eps_counter, np.mean(discounted_reward), np.mean(self.reward_queue), np.sum(reward_array > 0)))
+        if self.eps_counter % self.save_step:
+            self.saver.save(self.sess, os.path.abspath('.') + '/' + self.save_file)
