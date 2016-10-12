@@ -12,11 +12,13 @@ class Estimator(object):
 
     def get_estimator(self, inputs, **kwargs):
         if not self.reuse:
-            self.reuse = True
+            self.reuse = False
         if len(inputs) == 1:
-            return self.est_fn(inputs[0], **kwargs)
+            ret = self.est_fn(inputs[0], reuse=self.reuse, **kwargs)
         else:
-            return self.est_fn(inputs, **kwargs)
+            ret = self.est_fn(inputs, reuse=self.reuse, **kwargs)
+        self.reuse = True
+        return ret
 
 def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None):
     net = inputs

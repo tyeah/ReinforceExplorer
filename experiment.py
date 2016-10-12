@@ -14,11 +14,12 @@ args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 config = json.load(open(args.config))
+print('loaded config file: %s' % args.config)
 render = args.render
 learning = args.learning
 
 if args.save_dir is None:
-    args.save_dir = os.path.splitext(args.config)[0]
+    args.save_dir = 'weights/' + os.path.basename(os.path.splitext(args.config)[0])
 if not os.path.exists(args.save_dir):
     os.mkdir(args.save_dir)
 json.dump(config, open(args.save_dir + '/config.json', 'w'), indent=4)
