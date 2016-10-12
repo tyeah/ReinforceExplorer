@@ -44,11 +44,11 @@ class Agent(object):
         # tack action based on current state
         return np.random.randint(0, self.action_dim)
 
-    def experience(self, state, reward):
+    def experience(self, state, reward, done):
         # experience current state
         # receive the reward for last action
         self.inner_state.update(state)
-        print self.eps_end(reward, state)
+        print self.eps_end(done, reward, state)
 
         # if cond;
         #     self.update
@@ -181,7 +181,7 @@ class PGAgent(Agent):
         self.rollouts['eps_end_masks'].append(eps_end_mask)
 
     def init_state(self, state):
-        self.inner_state = InnerState(state)
+        self.inner_state = InnerState(state, **self.config['inner_state_params'])
 
     def action(self):
         # tack action based on current state
@@ -189,7 +189,7 @@ class PGAgent(Agent):
         self.rollouts['actions'].append(action)
         return action
 
-    def experience(self, state, reward):
+    def experience(self, state, reward, done):
         # experience current state
         # receive the reward for last action
         self.inner_state.update(state)
@@ -198,7 +198,7 @@ class PGAgent(Agent):
         for sidx, s in enumerate(self.rollouts['states']):
             s.append(current_inner_state[sidx])
         self.rollouts['rewards'].append(reward)
-        self.rollouts['eps_end_masks'].append(self.eps_end(reward, state))
+        self.rollouts['eps_end_masks'].append(self.eps_end(done, reward, state))
         # TODO: ansemble states, discounti rewards, actions, do update
 
         if self.cond():

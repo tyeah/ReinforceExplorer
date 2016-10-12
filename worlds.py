@@ -8,7 +8,7 @@ def init_world(name):
             'Pong-v0': PongWorld
             }
     if name not in worlds:
-        return worlds[gym_world](name)
+        return worlds['gym_world'](name)
     else:
         return worlds[name](name)
 
@@ -30,12 +30,17 @@ class GymWorld(World):
         self.render = self.env.render
         self.observation_dims = self.env.observation_space.shape
 
+    def eps_end(self):
+        def ee(done, reward, state=None):
+            return done
+        return ee
+
 class PongWorld(GymWorld):
     def __init__(self, name):
         super(PongWorld, self).__init__(name)
 
     def eps_end(self):
-        def ee(reward, state=None):
+        def ee(done, reward, state=None):
             return reward != 0
         return ee
 

@@ -8,11 +8,18 @@ Representation of agent's inner state. It can be single state vector /
 multiple frames / rnn hidden state, etc
 '''
 
+def init_inner_state(state, **params):
+    inner_states = {
+            'inner_state': InnerState,
+            'multi_step_inner_state': MultiStepInnerState
+            }
+    return inner_state[params['name']](state, **param)
+
 class InnerState(object):
     '''
     Base class
     '''
-    def __init__(self, state):
+    def __init__(self, state, **kwargs):
         self.current_state = utils.to_list(state)
         self.old_state = utils.to_list(state)
 
@@ -25,9 +32,9 @@ class InnerState(object):
 
 class MultiStepInnerState(object):
     '''
-    Base class
+    Keep Multiple Steps in the Inner State
     '''
-    def __init__(self, state, num_steps):
+    def __init__(self, state, num_steps, **kwargs):
         state_list = utils.to_list(state)
         self.num_steps = num_steps
         self.range_step = range(num_steps)

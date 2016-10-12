@@ -43,5 +43,5 @@ for i_eps in xrange(MAX_EPISODES):
         if render: env.render()
         action = agent.action()
         next_state, reward, done, _ = env.step(action)
-        agent.experience(state, reward)
+        agent.experience(state, reward, done)
         if done: break

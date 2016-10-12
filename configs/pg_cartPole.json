@@ -1,5 +1,5 @@
 {
-        "env": "Pong-v0",
+        "env": "CartPole-v0",
         "agent": "policy_gradient",
         "MAX_EPISODES": 10000,
         "MAX_STEPS": 1000,
@@ -21,7 +21,7 @@
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
-                "num_cnn_layers": 5,
+                "num_cnn_layers": 0,
                 "num_fc_layers": 2,
                 "trainable": true
              }
