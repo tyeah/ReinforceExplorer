@@ -1,14 +1,14 @@
 {
         "env": "CartPole-v0",
         "agent": "policy_gradient",
-        "MAX_EPISODES": 10000,
+        "MAX_EPISODES": 1000000,
         "MAX_STEPS": 1000,
         "discount_rate": 0.99,
         "reg_param": 1e-2,
-        "init_learning_rate": 1e-4,
+        "init_learning_rate": 1e-3,
         "init_exp_rate": 0.5,
-        "anneal_step_exp": 1000,
-        "anneal_step_lr": 5000,
+        "anneal_step_exp": 100000,
+        "anneal_step_lr": 100000,
         "anneal_base_exp": 0.5,
         "anneal_base_lr": 0.5,
         "min_lr": 1e-6,
@@ -16,13 +16,13 @@
         "store_eps": 4,
         "store_size": 100,
         "batch_size": 20,
-        "save_step": 5000,
+        "save_step": 50000,
         "save_dir": "weights/pg",
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
-                "num_cnn_layers": 0,
-                "num_fc_layers": 2,
+                "name": "fc", 
+                "num_hids": [20],
                 "trainable": true
              }
         },

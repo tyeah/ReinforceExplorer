@@ -126,7 +126,8 @@ class PGAgent(Agent):
         self.learning_rate = tf.maximum(self.config["init_learning_rate"] * (self.config["anneal_base_lr"] ** 
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), tf.float32)), self.config["min_lr"])
 
-        self.action_scores = Estimator('cnn').get_estimator(
+        self.action_scores = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
                 inputs=self.t_state, num_out=self.action_dim, 
                 scope='policy_network', 
                 **self.config['estimator_params']['policy_network'])

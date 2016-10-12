@@ -8,7 +8,7 @@ parser.add_argument('-g', '--gpu', type=str, default='-1')
 parser.add_argument('-c', '--config', type=str, default='configs/pg_pong.json')
 parser.add_argument('-w', '--weights', type=str, default=None)
 parser.add_argument('-s', '--save_dir', type=str, default=None)
-parser.add_argument('-r', '--render', type=bool, default=False)
+parser.add_argument('-r', '--render', action='store_true', default=False)
 parser.add_argument('-l', '--learning', action='store_true', default=True)
 args = parser.parse_args()
 

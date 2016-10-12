@@ -6,7 +6,8 @@ class Estimator(object):
     def __init__(self, fn_name):
         self.reuse = False
         estimators = {
-                'cnn': cnn
+                'cnn': cnn,
+                'fc': fc
                 }
         self.est_fn = estimators[fn_name]
 
@@ -20,7 +21,7 @@ class Estimator(object):
         self.reuse = True
         return ret
 
-def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None):
+def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None, **kwargs):
     net = inputs
     if scope == None: scope = 'cnn'
     with tf.variable_scope(scope, reuse=reuse):
@@ -39,3 +40,15 @@ def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=
             net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
             return net
 
+def fc(inputs, num_out, num_hids, reuse, trainable, scope=None, **kwards):
+    net = inputs
+    if scope == None: scope = 'fc'
+    with tf.variable_scope(scope, reuse=reuse):
+        with slim.arg_scope([slim.fully_connected],
+                trainable=trainable,
+                activation_fn=tf.nn.relu):
+            net = slim.flatten(net)
+            for nl, nh in enumerate(num_hids):
+                net = slim.fully_connected(net, nh, scope='fc_out%d' % (nl + 1))
+            net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
+            return net
