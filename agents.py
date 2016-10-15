@@ -60,7 +60,7 @@ class Agent(object):
 
     def build_train(self):
         optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
-                decay=0.9, epsilon=1e-5)
+                decay=0.9)
         tvars = tf.trainable_variables()
         if self.config["clip_norm"] <= 0:
             grads = tf.gradients(self.loss, tvars)
@@ -143,8 +143,8 @@ class PGAgent(Agent):
 
         dr_mean, dr_var = tf.nn.moments(self.t_discounted_reward, axes=[0])
         dr_std = tf.sqrt(dr_var)
-        #t_discounted_reward_reparamed = self.t_discounted_reward - dr_mean
-        t_discounted_reward_reparamed = (self.t_discounted_reward - dr_mean) / dr_std
+        t_discounted_reward_reparamed = self.t_discounted_reward
+        #t_discounted_reward_reparamed = (self.t_discounted_reward - dr_mean) / dr_std
         #self.dr_mean, self.dr_std, self.t_discounted_reward_reparamed = dr_mean, dr_std, t_discounted_reward_reparamed
         # reparameterization trick
         self.reinforce_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -226,7 +226,12 @@ class PGAgent(Agent):
                 dr = 0
             dr = dr * self.config["discount_rate"] + self.rollouts['rewards'][i]
             discounted_reward[i] = dr
+            
+        # TODO: when to update, how to set batch, non-iid sgd, loss func
         self.reward_queue.append(np.mean(discounted_reward))
+        discounted_reward /= np.mean(discounted_reward)
+        discounted_reward /= np.std(discounted_reward)
+
         feeds = self.gen_feed(discounted_reward)
         if self.eps_counter % self.config["log_step"] == 0:
             for i, feed in enumerate(feeds): 
