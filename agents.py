@@ -110,7 +110,9 @@ class PGAgent(Agent):
             self.saver.restore(self.sess, self.config["weights"])
         else:
             self.sess.run(tf.initialize_all_variables())
+        '''
         self.add_summary()
+        '''
 
     def build_model(self):
         # TODO: should we set exp rate as a placeholder?
@@ -121,8 +123,14 @@ class PGAgent(Agent):
         random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        '''
         self.exp_rate = self.config["init_exp_rate"] * (self.config["anneal_base_exp"] ** 
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_exp"]), tf.float32))
+        '''
+
+        #tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32)
+        self.exp_rate = tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32) / (1.0 * self.config['anneal_step_exp']) * (self.config["init_exp_rate"] - self.config["min_exp"]) + self.config["min_exp"]
+
         self.learning_rate = tf.maximum(self.config["init_learning_rate"] * (self.config["anneal_base_lr"] ** 
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), tf.float32)), self.config["min_lr"])
 
@@ -154,7 +162,23 @@ class PGAgent(Agent):
         for v in self.reg_loss.values():
             self.loss += v
         self.build_train()
+        '''
+        ####################################
+        optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
+                decay=0.9)
+        self.reinforce_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                self.action_scores , self.t_action))
+        self.loss = self.reinforce_loss
+        self.gradients = optimizer.compute_gradients(self.loss)
+        for i, (grad, var) in enumerate(self.gradients):
+            if grad is not None:
+                #print var.name, var.get_shape(), grad.get_shape(), (grad * self.discounted_rewards).get_shape()
+                self.gradients[i] = (grad * t_discounted_reward_reparamed, var)
+        self.train_op = optimizer.apply_gradients(self.gradients, global_step=self.global_step)
+        ####################################
+        '''
 
+        '''
         self.summary_scalars['reinforce_loss'] = self.reinforce_loss
         self.summary_scalars['loss'] = self.loss
         for k, v in self.reg_loss.iteritems():
@@ -164,6 +188,7 @@ class PGAgent(Agent):
         self.summary_scalars['exp_rate'] = self.exp_rate
         for v in policy_network_variables:
             self.summary_histograms[v.name] = v
+        '''
 
 
     def reset_buffer(self):
@@ -210,11 +235,14 @@ class PGAgent(Agent):
         return 0
 
     def gen_feed(self, discounted_reward):
-        num_batches = int(len(self.rollouts['rewards']) // self.config["batch_size"])
-        res = (len(self.rollouts['rewards']) % self.config["batch_size"]) > 0
-        for i in xrange( num_batches + res):
-            feed = dict([(s_t, s[i:(i+self.config["batch_size"])]) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
-                    [(self.t_discounted_reward, discounted_reward[i:(i+self.config["batch_size"])]), (self.t_action, self.rollouts['actions'][i:(i+self.config["batch_size"])])])
+        '''
+        for v in self.rollouts.values():
+            v = v[:-1]
+        '''
+        num_batches = int(np.ceil(len(self.rollouts['rewards']) * 1.0 / self.config["batch_size"]))
+        for i in xrange(num_batches):
+            feed = dict([(s_t, np.array(s[i:(i+self.config["batch_size"])])) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
+                    [(self.t_discounted_reward, np.array(discounted_reward[i:(i+self.config["batch_size"])])), (self.t_action, np.array(self.rollouts['actions'][i:(i+self.config["batch_size"])]))])
             yield feed
 
 
@@ -229,30 +257,32 @@ class PGAgent(Agent):
             
         # TODO: when to update, how to set batch, non-iid sgd, loss func
         self.reward_queue.append(np.mean(discounted_reward))
-        discounted_reward /= np.mean(discounted_reward)
+        discounted_reward -= np.mean(discounted_reward)
         discounted_reward /= np.std(discounted_reward)
+        #print discounted_reward
 
         feeds = self.gen_feed(discounted_reward)
+        '''
         if self.eps_counter % self.config["log_step"] == 0:
             for i, feed in enumerate(feeds): 
                 if i == 0:
                     summary, _ = self.sess.run([self.summary_merged, self.train_op], feed_dict=feed)
-                    '''
-                    summary, _, dr_mean, dr_std, t_discounted_reward_reparamed = self.sess.run([self.summary_merged, self.train_op, self.dr_mean, self.dr_std, self.t_discounted_reward_reparamed], feed_dict=feed)
-                    print '-' * 80
-                    drrr = feed[self.t_discounted_reward]
-                    print np.mean(drrr), np.std(drrr)
-                    print dr_mean, dr_std
-                    print np.mean(t_discounted_reward_reparamed), np.std(t_discounted_reward_reparamed)
-                    '''
                     self.writer.add_summary(summary, self.eps_counter)
                 else:
                     _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
         else:
             for i, feed in enumerate(feeds): 
                 _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
-        reward_array = np.array(self.rollouts['rewards'])
+        '''
+        for feed in feeds:
+            #print([v.shape for v in feed.values()])
+            _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
+        #print("global step: %d, exp rate: %f" % tuple(self.sess.run([self.global_step, self.exp_rate])))
+        #print("global step: %d, exp rate: %f" % (self.eps_counter, self.sess.run(self.exp_rate)))
+        #reward_array = np.array(self.rollouts['rewards'])
         #print('avg reward: %f' % np.mean(reward_array[reward_array != 0]))
+        '''
         print('after episode %d, avg reward: %10.7f, accumulated avg reward: %f, loss: %f, successes: %d' % (self.eps_counter, np.mean(discounted_reward), np.mean(self.reward_queue), loss, np.sum(reward_array > 0)))
         if self.eps_counter % self.config["save_step"] == 0:
             self.saver.save(self.sess, self.save_file + '-%d' % self.eps_counter)
+        '''

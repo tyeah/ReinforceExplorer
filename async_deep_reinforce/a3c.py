@@ -114,6 +114,7 @@ def train_function(parallel_index):
   training_thread.set_start_time(start_time)
 
   while True:
+    # TODO: whatch out: loop is here :)
     if stop_requested:
       break
     if global_t > MAX_TIME_STEP:

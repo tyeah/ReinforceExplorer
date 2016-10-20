@@ -4,17 +4,18 @@
         "MAX_EPISODES": 1000000,
         "MAX_STEPS": 1000,
         "discount_rate": 0.99,
-        "reg_param": 1e-2,
+        "reg_param": 1e-3,
         "init_learning_rate": 1e-4,
         "init_exp_rate": 0.5,
-        "anneal_step_exp": 100000,
-        "anneal_step_lr": 100000,
+        "anneal_step_exp": 200000,
+        "anneal_step_lr": 100000000,
         "anneal_base_exp": 0.99,
         "anneal_base_lr": 1,
         "min_lr": 1e-6,
+        "min_exp": 0,
         "clip_norm": 5,
-        "store_eps": 4,
-        "store_size": 100,
+        "store_eps": 1,
+        "store_size": 50,
         "batch_size": 1,
         "save_step": 50000,
         "save_dir": "weights/pg",
@@ -27,7 +28,7 @@
              }
         },
         "inner_state_params": {
-            "name": "multi_step_inner_state",
+            "name": "inner_state",
             "num_steps": 3
 
         }

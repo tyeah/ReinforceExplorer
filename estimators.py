@@ -46,7 +46,7 @@ def fc(inputs, num_out, num_hids, reuse, trainable, scope=None, **kwards):
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.fully_connected],
                 trainable=trainable,
-                activation_fn=tf.nn.relu):
+                activation_fn=tf.nn.tanh):
             net = slim.flatten(net)
             for nl, nh in enumerate(num_hids):
                 net = slim.fully_connected(net, nh, scope='fc_out%d' % (nl + 1))
