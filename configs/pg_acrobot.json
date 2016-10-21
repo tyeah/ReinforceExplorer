@@ -1,5 +1,5 @@
 {
-        "env": "CartPole-v0",
+        "env": "Acrobot-v1",
         "agent": "policy_gradient",
         "MAX_EPISODES": 1000000,
         "MAX_STEPS": 1000,
@@ -11,7 +11,7 @@
         "anneal_step_exp": 200000,
         "anneal_step_lr": 200000,
         "anneal_base_exp": 0.99,
-        "anneal_base_lr": 0.5,
+        "anneal_base_lr": 1,
         "min_lr": 1e-6,
         "min_exp": 0,
         "clip_norm": 0,

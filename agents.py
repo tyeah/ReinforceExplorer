@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from inner_states import InnerState
+from inner_states import init_inner_state, InnerState
 from estimators import Estimator
 from collections import deque
 import os
@@ -9,7 +9,8 @@ import os
 def init_agent(agent_name):
     agents = {
             'naive': Agent,
-            'policy_gradient': PGAgent
+            'policy_gradient': PGAgent,
+            'actor_critic': ACAgent
             }
     return agents[agent_name]
 
@@ -81,12 +82,12 @@ class Agent(object):
             num_params += np.prod(v.get_shape().as_list())
         print 'total number of params: %d' % num_params
 
-    def add_reg(self):
-        self.reg_loss = {}
+    def add_reg(self, variables):
+        self.reg_loss = 0
         if 'l2' in self.config and self.config['l2'] > 0:
-            self.reg_loss['l2'] = self.config['l2'] * tf.reduce_mean([tf.nn.l2_loss(v) for v in policy_network_variables])
+            self.reg_loss += self.config['l2'] * tf.reduce_sum([tf.nn.l2_loss(v) for v in variables])
         if 'l1' in self.config and self.config['l1'] > 0:
-            self.reg_loss['l1'] = self.config['l1'] * tf.reduce_mean([tf.nn.l1_loss(v) for v in policy_network_variables])
+            self.reg_loss += self.config['l1'] * tf.reduce_sum([tf.nn.l1_loss(v) for v in variables])
 
 class PGAgent(Agent):
     '''
@@ -106,17 +107,19 @@ class PGAgent(Agent):
         self.sess = tf.Session()
         self.build_model()
         self.saver = tf.train.Saver()
+        self.init_weights()
+        '''
+        self.add_summary()
+        '''
+    def init_weights(self):
         if self.config["weights"] is not None:
             self.saver.restore(self.sess, self.config["weights"])
         else:
             self.sess.run(tf.initialize_all_variables())
-        '''
-        self.add_summary()
-        '''
 
     def build_model(self):
         # TODO: should we set exp rate as a placeholder?
-        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od) for od in self.observation_dims]
+        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
         self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,)) # for discrete action space
         self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
         batch_size = tf.shape(self.t_state)[0]
@@ -131,8 +134,10 @@ class PGAgent(Agent):
         #tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32)
         self.exp_rate = tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32) / (1.0 * self.config['anneal_step_exp']) * (self.config["init_exp_rate"] - self.config["min_exp"]) + self.config["min_exp"]
 
-        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * (self.config["anneal_base_lr"] ** 
-                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), tf.float32)), self.config["min_lr"])
+        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * 
+                (self.config["anneal_base_lr"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
+                    tf.float32)), self.config["min_lr"])
 
         self.action_scores = Estimator(self.config['estimator_params']
                 ['policy_network']['name']).get_estimator(
@@ -155,28 +160,12 @@ class PGAgent(Agent):
         #t_discounted_reward_reparamed = (self.t_discounted_reward - dr_mean) / dr_std
         #self.dr_mean, self.dr_std, self.t_discounted_reward_reparamed = dr_mean, dr_std, t_discounted_reward_reparamed
         # reparameterization trick
-        self.reinforce_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+        self.reinforce_loss =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                 self.action_scores , self.t_action) * t_discounted_reward_reparamed)
-        self.add_reg()
+        self.add_reg(policy_network_variables)
         self.loss = tf.identity(self.reinforce_loss)
-        for v in self.reg_loss.values():
-            self.loss += v
+        self.loss += self.reg_loss
         self.build_train()
-        '''
-        ####################################
-        optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
-                decay=0.9)
-        self.reinforce_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
-                self.action_scores , self.t_action))
-        self.loss = self.reinforce_loss
-        self.gradients = optimizer.compute_gradients(self.loss)
-        for i, (grad, var) in enumerate(self.gradients):
-            if grad is not None:
-                #print var.name, var.get_shape(), grad.get_shape(), (grad * self.discounted_rewards).get_shape()
-                self.gradients[i] = (grad * t_discounted_reward_reparamed, var)
-        self.train_op = optimizer.apply_gradients(self.gradients, global_step=self.global_step)
-        ####################################
-        '''
 
         '''
         self.summary_scalars['reinforce_loss'] = self.reinforce_loss
@@ -206,12 +195,18 @@ class PGAgent(Agent):
         self.rollouts['actions'].append(action)
         self.rollouts['eps_end_masks'].append(eps_end_mask)
 
+    def reset_model(self):
+        print("reset model")
+        self.sess.run(self.global_step.assign(0))
+        self.reset_buffer()
+        self.sess.run(tf.initialize_all_variables())
+
     def init_state(self, state):
-        self.inner_state = InnerState(state, **self.config['inner_state_params'])
+        self.inner_state = init_inner_state(state, **self.config['inner_state_params'])
 
     def action(self):
         # tack action based on current state
-        action = self.sess.run(self.action_sampler, feed_dict=dict([(s_t, [s]) for s_t, s in zip(self.t_state, self.inner_state.current_state)]))[0][0]
+        action = self.sess.run(self.action_sampler, feed_dict=dict([(s_t, [s]) for s_t, s in zip(self.t_state, self.inner_state.get_current_state())]))[0][0]
         self.rollouts['actions'].append(action)
         return action
 
@@ -240,25 +235,30 @@ class PGAgent(Agent):
             v = v[:-1]
         '''
         num_batches = int(np.ceil(len(self.rollouts['rewards']) * 1.0 / self.config["batch_size"]))
+        #num_batches = 1
         for i in xrange(num_batches):
             feed = dict([(s_t, np.array(s[i:(i+self.config["batch_size"])])) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
                     [(self.t_discounted_reward, np.array(discounted_reward[i:(i+self.config["batch_size"])])), (self.t_action, np.array(self.rollouts['actions'][i:(i+self.config["batch_size"])]))])
             yield feed
 
 
-    def update(self):
-        # learn from experiences
+    def compute_discount_rewards(self):
         discounted_reward = np.zeros_like(self.rollouts['rewards'])
         for i in reversed(xrange(0, len(self.rollouts['rewards']))):
             if self.rollouts['eps_end_masks'][i]:
                 dr = 0
             dr = dr * self.config["discount_rate"] + self.rollouts['rewards'][i]
             discounted_reward[i] = dr
+        return discounted_reward
+
+    def update(self):
+        # learn from experiences
+        discounted_reward = self.compute_discount_rewards()
             
         # TODO: when to update, how to set batch, non-iid sgd, loss func
         self.reward_queue.append(np.mean(discounted_reward))
         discounted_reward -= np.mean(discounted_reward)
-        discounted_reward /= np.std(discounted_reward)
+        #discounted_reward /= np.std(discounted_reward)
         #print discounted_reward
 
         feeds = self.gen_feed(discounted_reward)
@@ -286,3 +286,77 @@ class PGAgent(Agent):
         if self.eps_counter % self.config["save_step"] == 0:
             self.saver.save(self.sess, self.save_file + '-%d' % self.eps_counter)
         '''
+
+
+class ACAgent(PGAgent):
+    '''
+    Actor Critic
+    '''
+    def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
+        super(ACAgent, self).__init__(observation_dims, action_dim, config, eps_end, learning)
+
+    def build_model(self):
+        # TODO: should we set exp rate as a placeholder?
+        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,)) # for discrete action space
+        self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        batch_size = tf.shape(self.t_state)[0]
+        random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
+
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        '''
+        self.exp_rate = self.config["init_exp_rate"] * (self.config["anneal_base_exp"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_exp"]), tf.float32))
+        '''
+
+        self.exp_rate = tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32) / (1.0 * self.config['anneal_step_exp']) * (self.config["init_exp_rate"] - self.config["min_exp"]) + self.config["min_exp"]
+
+        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * 
+                (self.config["anneal_base_lr"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
+                    tf.float32)), self.config["min_lr"])
+
+        self.actor = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
+                inputs=self.t_state, num_out=self.action_dim, 
+                scope='policy_network', 
+                **self.config['estimator_params']['policy_network'])
+        self.critic = Estimator(self.config['estimator_params']
+                ['value_network']['name']).get_estimator(
+                inputs=self.t_state, num_out=1, 
+                scope='value_network', 
+                **self.config['estimator_params']['value_network'])
+        policy_network_variables = tf.get_collection(
+                tf.GraphKeys.TRAINABLE_VARIABLES, scope="policy_network")
+        self.action_probs = tf.nn.softmax(self.actor)
+        self.explore = tf.less(tf.random_uniform([batch_size]), self.exp_rate)
+        self.action_sampler = tf.select(self.explore, 
+                tf.multinomial(random_action_probs, num_samples=1),
+                tf.multinomial(self.action_probs, num_samples=1))
+        # TODO: seed?
+        # TODO: how to measure global_step?
+        value_network_variables = tf.get_collection(
+                tf.GraphKeys.TRAINABLE_VARIABLES, scope="value_network")
+
+        advantage = self.t_discounted_reward - self.critic
+        self.actor_loss =  tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                self.actor, self.t_action) * advantage)
+        self.critic_loss = tf.reduce_mean(tf.square(self.t_discounted_reward - self.critic))
+        self.add_reg(policy_network_variables)
+        self.add_reg(value_network_variables)
+        self.loss = (self.actor_loss + self.critic_loss)
+        self.loss += self.reg_loss
+        self.build_train()
+
+    def update(self):
+        # learn from experiences
+        discounted_reward = self.compute_discount_rewards()
+            
+        # TODO: when to update, how to set batch, non-iid sgd, loss func
+        self.reward_queue.append(np.mean(discounted_reward))
+        #discounted_reward -= np.mean(discounted_reward)
+        #discounted_reward /= np.std(discounted_reward)
+
+        feeds = self.gen_feed(discounted_reward)
+        for feed in feeds:
+            _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)

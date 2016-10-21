@@ -13,7 +13,7 @@ def init_inner_state(state, **params):
             'inner_state': InnerState,
             'multi_step_inner_state': MultiStepInnerState
             }
-    return inner_state[params['name']](state, **param)
+    return inner_states[params['name']](state, **params)
 
 class InnerState(object):
     '''
@@ -41,11 +41,15 @@ class MultiStepInnerState(object):
         self.num_states = len(state_list)
         self.range_state = range(self.num_states)
 
-        self.current_state = [deque(num_steps) for _ in self.range_state]
-        self.old_state = [deque(num_steps) for _ in self.range_state]
+        self.current_state = [deque(maxlen=num_steps) for _ in self.range_state]
+        self.old_state = [deque(maxlen=num_steps) for _ in self.range_state]
+        for _ in self.range_step:
+            for qidx in self.range_state:
+                self.current_state[qidx].append(state)
+                self.old_state[qidx].append(state)
         self.current_state.append(state_list)
         #self.num_states = len(current_state[-1]) if utils.multi_state(state) else 1
-        self.num_states = len(current_state[-1])
+        self.num_states = len(self.current_state[-1])
         self.state_dims = [len(s.shape) for s in state_list]
 
     def update_deque(self, qidx, state_list):
@@ -54,8 +58,11 @@ class MultiStepInnerState(object):
 
     def update(self, state):
         state_list = utils.to_list(state)
-        for qidx, s in state_list:
-            self.update_queue(qidx, state_list)
+        for qidx, s in enumerate(state_list):
+            self.update_deque(qidx, state_list)
 
     def get_current_state(self):
-        return [np.concatenate(self.current_state[qidx], axis=self.state_dims[qidx]) for qidx in self.range_state]
+        #cs = [np.array(self.current_state[qidx]) for qidx in self.range_state]
+        cs = [np.concatenate(self.current_state[qidx], axis=self.state_dims[qidx]-1) for qidx in self.range_state]
+        #cs = [np.rollaxis(np.array(self.current_state[qidx]), axis=self.state_dims[qidx]) for qidx in self.range_state]
+        return cs

@@ -37,19 +37,29 @@ agent = init_agent(config['agent'])(observation_dims=(env.observation_dims,),
         learning=learning, config=config)
 
 avg_rewards = deque(maxlen=100)
+no_reward_since = 0
 for i_eps in xrange(MAX_EPISODES):
     total_rewards = 0
     state = env.reset()
 
     agent.init_state(state)
-    acc_rewards = []
+    acc_rewards = 0
     for t in xrange(MAX_STEPS):
         if render: env.render()
         action = agent.action()
         next_state, reward, done, _ = env.step(action)
-        acc_rewards.append(reward)
-        reward = -10 if done else 0.1
+        acc_rewards += reward
+        #reward = -10 if done else 0.1
         agent.experience(next_state, reward, done)
         if done: break
-    avg_rewards.append(np.sum(acc_rewards))
+
+    if not done:
+        no_reward_since += 1
+        if no_reward_since >= 5:
+            agent.reset_model()
+            no_reward_since = 0
+            continue
+    else:
+        no_reward_since = 0
+    avg_rewards.append(acc_rewards)
     print("episode %d, mean reward: %f" % (i_eps, np.mean(avg_rewards)))

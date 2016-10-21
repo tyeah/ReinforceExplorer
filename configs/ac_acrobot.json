@@ -1,6 +1,6 @@
 {
-        "env": "CartPole-v0",
-        "agent": "policy_gradient",
+        "env": "Acrobot-v1",
+        "agent": "actor_critic",
         "MAX_EPISODES": 1000000,
         "MAX_STEPS": 1000,
         "discount_rate": 0.99,
@@ -19,10 +19,15 @@
         "store_size": 50,
         "batch_size": 1,
         "save_step": 50000,
-        "save_dir": "weights/pg",
+        "save_dir": "weights/ac",
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
+                "name": "fc", 
+                "num_hids": [20],
+                "trainable": true
+             },
+            "value_network": {
                 "name": "fc", 
                 "num_hids": [20],
                 "trainable": true
@@ -30,7 +35,7 @@
         },
         "inner_state_params": {
             "name": "multi_step_inner_state",
-            "num_steps": 2
+            "num_steps": 1
 
         }
 }
