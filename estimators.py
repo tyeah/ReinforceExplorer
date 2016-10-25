@@ -7,7 +7,8 @@ class Estimator(object):
         self.reuse = False
         estimators = {
                 'cnn': cnn,
-                'fc': fc
+                'fc': fc,
+                'fc_action': fc_action
                 }
         self.est_fn = estimators[fn_name]
 
@@ -40,7 +41,7 @@ def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=
             net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
             return net
 
-def fc(inputs, num_out, num_hids, reuse, trainable, scope=None, **kwards):
+def fc(inputs, num_out, num_hids, reuse, trainable, scope=None, **kwargs):
     net = inputs
     if scope == None: scope = 'fc'
     with tf.variable_scope(scope, reuse=reuse):
@@ -50,5 +51,25 @@ def fc(inputs, num_out, num_hids, reuse, trainable, scope=None, **kwards):
             net = slim.flatten(net)
             for nl, nh in enumerate(num_hids):
                 net = slim.fully_connected(net, nh, scope='fc_out%d' % (nl + 1))
+            net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
+            return net
+
+def fc_action(inputs, actions, num_out, num_hids, reuse, trainable, scope=None, **kwargs):
+    net = inputs
+    merge_layer = kwargs.get('merge_layer', -1)
+    if scope == None: scope = 'fc'
+    with tf.variable_scope(scope, reuse=reuse):
+        with slim.arg_scope([slim.fully_connected],
+                trainable=trainable,
+                activation_fn=tf.nn.tanh):
+            net = slim.flatten(net)
+            for nl, nh in enumerate(num_hids):
+                net = slim.fully_connected(net, nh, scope='fc_out%d' % (nl + 1))
+                '''
+                if nl == len(num_hids) + merge_layer + 1:
+                    print 'concat'
+                    net = tf.concat(1, (net, actions))
+                '''
+            net = tf.concat(1, (net, tf.cast(tf.expand_dims(actions, 1), net.dtype)))
             net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
             return net

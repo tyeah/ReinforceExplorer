@@ -66,3 +66,7 @@ class MultiStepInnerState(object):
         cs = [np.concatenate(self.current_state[qidx], axis=self.state_dims[qidx]-1) for qidx in self.range_state]
         #cs = [np.rollaxis(np.array(self.current_state[qidx]), axis=self.state_dims[qidx]) for qidx in self.range_state]
         return cs
+
+    def get_old_state(self):
+        old_state = [np.concatenate(self.old_state[qidx], axis=self.state_dims[qidx]-1) for qidx in self.range_state]
+        return old_state

@@ -38,28 +38,35 @@ agent = init_agent(config['agent'])(observation_dims=(env.observation_dims,),
 
 avg_rewards = deque(maxlen=100)
 no_reward_since = 0
-for i_eps in xrange(MAX_EPISODES):
-    total_rewards = 0
-    state = env.reset()
+log_file = open('log.txt', 'w')
+try:
+    for i_eps in xrange(MAX_EPISODES):
+        total_rewards = 0
+        state = env.reset()
 
-    agent.init_state(state)
-    acc_rewards = 0
-    for t in xrange(MAX_STEPS):
-        if render: env.render()
-        action = agent.action()
-        next_state, reward, done, _ = env.step(action)
-        acc_rewards += reward
-        #reward = -10 if done else 0.1
-        agent.experience(next_state, reward, done)
-        if done: break
+        agent.init_state(state)
+        acc_rewards = 0
+        for t in xrange(MAX_STEPS):
+            if render: env.render()
+            action = agent.action()
+            next_state, reward, done, _ = env.step(action)
+            acc_rewards += reward
+            #reward = -10 if done else 0.1
+            reward = 5.0 if done else -0.1
+            agent.experience(next_state, reward, done)
+            if done: break
 
-    if not done:
-        no_reward_since += 1
-        if no_reward_since >= 5:
-            agent.reset_model()
+        if not done:
+            no_reward_since += 1
+            if no_reward_since >= 5:
+                agent.reset_model()
+                no_reward_since = 0
+                continue
+        else:
             no_reward_since = 0
-            continue
-    else:
-        no_reward_since = 0
-    avg_rewards.append(acc_rewards)
-    print("episode %d, mean reward: %f" % (i_eps, np.mean(avg_rewards)))
+        avg_rewards.append(acc_rewards)
+        print("episode %d, mean reward: %f" % (i_eps, np.mean(avg_rewards)))
+        log_file.write('%f\n' % np.mean(avg_rewards))
+except KeyboardInterrupt:
+    print('KeyboardInterrupt')
+    log_file.close()

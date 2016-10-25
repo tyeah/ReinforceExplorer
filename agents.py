@@ -4,13 +4,15 @@ from inner_states import init_inner_state, InnerState
 from estimators import Estimator
 from collections import deque
 import os
+from copy import deepcopy
 
 
 def init_agent(agent_name):
     agents = {
             'naive': Agent,
             'policy_gradient': PGAgent,
-            'actor_critic': ACAgent
+            'actor_critic': ACAgent,
+            'ddpg': DDPGAgent
             }
     return agents[agent_name]
 
@@ -63,12 +65,20 @@ class Agent(object):
         optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
                 decay=0.9)
         tvars = tf.trainable_variables()
+        '''
         if self.config["clip_norm"] <= 0:
             grads = tf.gradients(self.loss, tvars)
         else:
             grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.config["clip_norm"])
-        gradients = optimizer.compute_gradients(self.loss)
         self.train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        '''
+        gradients = tf.gradients(self.loss, tvars)
+        if self.config['clip_norm'] >= 0:
+            for i, (grad, var) in enumerate(zip(gradients, tvars)):
+                if grad is not None:
+                    gradients[i] = (tf.clip_by_norm(grad, self.config['clip_norm']), var) 
+        self.train_op = optimizer.apply_gradients(gradients, global_step=self.global_step)
+
     def add_summary(self):
         for k, v in self.summary_scalars.iteritems():
             tf.scalar_summary(k, v)
@@ -203,6 +213,9 @@ class PGAgent(Agent):
 
     def init_state(self, state):
         self.inner_state = init_inner_state(state, **self.config['inner_state_params'])
+        current_inner_state = self.inner_state.get_current_state()
+        for sidx, s in enumerate(self.rollouts['states']):
+            s.append(current_inner_state[sidx])
 
     def action(self):
         # tack action based on current state
@@ -215,11 +228,12 @@ class PGAgent(Agent):
         # receive the reward for last action
         self.inner_state.update(state)
         # TODO: change the stored states as inner states
-        current_inner_state = self.inner_state.get_current_state()
-        for sidx, s in enumerate(self.rollouts['states']):
-            s.append(current_inner_state[sidx])
         self.rollouts['rewards'].append(reward)
         self.rollouts['eps_end_masks'].append(self.eps_end(done, reward, state))
+        if not self.eps_end(done, reward, state):
+            current_inner_state = self.inner_state.get_current_state()
+            for sidx, s in enumerate(self.rollouts['states']):
+                s.append(current_inner_state[sidx])
         # TODO: ansemble states, discounti rewards, actions, do update
 
         if self.cond():
@@ -230,16 +244,21 @@ class PGAgent(Agent):
         return 0
 
     def gen_feed(self, discounted_reward):
-        '''
-        for v in self.rollouts.values():
-            v = v[:-1]
-        '''
         num_batches = int(np.ceil(len(self.rollouts['rewards']) * 1.0 / self.config["batch_size"]))
+        ########
+        '''
+        discounted_reward = discounted_reward[:-1]
+        self.rollouts['actions'] = self.rollouts['actions'][:-1]
+        for i, v in enumerate(self.rollouts['states']):
+            self.rollouts['states'][i] = self.rollouts['states'][i][:-1]
+        '''
+        ########
         #num_batches = 1
         for i in xrange(num_batches):
             feed = dict([(s_t, np.array(s[i:(i+self.config["batch_size"])])) for s_t, s in zip(self.t_state, self.rollouts['states'])] +
                     [(self.t_discounted_reward, np.array(discounted_reward[i:(i+self.config["batch_size"])])), (self.t_action, np.array(self.rollouts['actions'][i:(i+self.config["batch_size"])]))])
             yield feed
+
 
 
     def compute_discount_rewards(self):
@@ -360,3 +379,185 @@ class ACAgent(PGAgent):
         feeds = self.gen_feed(discounted_reward)
         for feed in feeds:
             _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
+
+
+class DDPGAgent(PGAgent):
+    '''
+    DDPG actor critic
+    '''
+    def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
+        super(DDPGAgent, self).__init__(observation_dims, action_dim, config, eps_end, learning)
+        self.init_target()
+        self.acc_memory_size = 0
+        self.cond = lambda: self.acc_memory_size >= self.config['batch_size']
+
+    def build_model(self):
+        # TODO: should we set exp rate as a placeholder?
+        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_state_new = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,)) # for discrete action space
+        self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        self.t_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        batch_size = tf.shape(self.t_state)[0]
+        random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
+
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        '''
+        self.exp_rate = self.config["init_exp_rate"] * (self.config["anneal_base_exp"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_exp"]), tf.float32))
+        '''
+
+        self.exp_rate = tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32) / (1.0 * self.config['anneal_step_exp']) * (self.config["init_exp_rate"] - self.config["min_exp"]) + self.config["min_exp"]
+
+        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * 
+                (self.config["anneal_base_lr"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
+                    tf.float32)), self.config["min_lr"])
+
+        self.actor = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
+                inputs=self.t_state, num_out=self.action_dim, 
+                scope='actor', 
+                **self.config['estimator_params']['policy_network'])
+        self.critic = Estimator(self.config['estimator_params']
+                ['value_network']['name']).get_estimator(
+                inputs=self.t_state, actions=self.t_action, num_out=1, 
+                scope='critic', 
+                **self.config['estimator_params']['value_network'])
+
+        self.action_sampler_deterministic = tf.argmax(self.actor, dimension=1)
+        self.action_probs = tf.nn.softmax(self.actor)
+        self.explore = tf.less(tf.random_uniform([batch_size]), self.exp_rate)
+        self.action_sampler = tf.select(self.explore, 
+                tf.multinomial(random_action_probs, num_samples=1),
+                tf.multinomial(self.action_probs, num_samples=1))
+
+        actor_target_config = deepcopy(self.config['estimator_params']['policy_network'])
+        actor_target_config['trainable'] = False
+        self.actor_target = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
+                inputs=self.t_state_new, num_out=self.action_dim, 
+                scope='actor_target',
+                **actor_target_config)
+        critic_target_config = deepcopy(self.config['estimator_params']['policy_network'])
+        critic_target_config['trainable'] = False
+        self.critic_target = Estimator(self.config['estimator_params']
+                ['value_network']['name']).get_estimator(
+                inputs=self.t_state_new, actions=self.action_sampler_deterministic, num_out=1, 
+                scope='critic_target',
+                **critic_target_config)
+
+        actor_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="actor")])
+        critic_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="critic")])
+        actor_target_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="actor_target")])
+        critic_target_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="critic_target")])
+
+        self.target_init_ops = []
+        for k, v in actor_variables.iteritems():
+            self.target_init_ops.append(actor_target_variables[k].assign(v))
+        for k, v in critic_variables.iteritems():
+            self.target_init_ops.append(critic_target_variables[k].assign(v))
+        self.target_update_ops = []
+        tau = self.config["tau"]
+        for k, v in actor_variables.iteritems():
+            self.target_update_ops.append(actor_target_variables[k].assign(
+                tau * v + (1.0 - tau) * actor_target_variables[k]))
+        for k, v in critic_variables.iteritems():
+            self.target_update_ops.append(critic_target_variables[k].assign(
+                tau * v + (1.0 - tau) * critic_target_variables[k]))
+
+        self.actor_loss = tf.reduce_mean(self.critic_target)
+        self.target = self.t_reward + self.config["discount_rate"] * self.critic_target
+        self.critic_loss = tf.reduce_mean(self.target - self.critic)
+
+        self.add_reg(actor_variables.values())
+        self.add_reg(critic_variables.values())
+        self.loss = (self.actor_loss + self.critic_loss)
+        self.loss += self.reg_loss
+        self.build_train()
+
+    def build_train(self):
+        optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
+                decay=0.9)
+        tvars = tf.trainable_variables()
+        if self.config["clip_norm"] <= 0:
+            grads = tf.gradients(self.loss, tvars)
+        else:
+            grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.config["clip_norm"])
+        self.train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+
+    def gen_feed(self):
+        batch_indices = np.random.randint(0, self.acc_memory_size, self.config['batch_size'])
+        feed = dict([(s_t, [s[bi] for bi in batch_indices]) 
+            for s_t, s in zip(self.t_state, self.rollouts['states_old'])] +
+            [(s_t, [s[bi] for bi in batch_indices]) 
+                for s_t, s in zip(self.t_state_new, self.rollouts['states'])])
+        feed[self.t_reward] = [self.rollouts['rewards'][bi] for bi in batch_indices]
+        feed[self.t_action] = [self.rollouts['actions'][bi] for bi in batch_indices]
+        return feed
+
+    def reset_buffer(self):
+        ms = self.config['memory_size']
+        deque(maxlen=ms)
+        self.rollouts = {
+                'states': [deque(maxlen=ms) for _ in xrange(len(self.observation_dims))],
+                'states_old': [deque(maxlen=ms) for _ in xrange(len(self.observation_dims))],
+                'rewards': deque(maxlen=ms),
+                'actions': deque(maxlen=ms),
+                }
+
+    def init_state(self, state):
+        self.inner_state = init_inner_state(state, **self.config['inner_state_params'])
+        current_inner_state = self.inner_state.get_current_state()
+        for sidx, s in enumerate(self.rollouts['states_old']):
+            s.append(current_inner_state[sidx])
+
+    def experience(self, state, reward, done):
+        # experience current state
+        # receive the reward for last action
+        self.inner_state.update(state)
+        # TODO: change the stored states as inner states
+        self.rollouts['rewards'].append(reward)
+        self.acc_memory_size = len(self.rollouts['rewards'])
+        #self.rollouts['eps_end_masks'].append(self.eps_end(done, reward, state))
+        current_inner_state = self.inner_state.get_current_state()
+        for sidx, s in enumerate(self.rollouts['states']):
+            s.append(current_inner_state[sidx])
+        if not self.eps_end(done, reward, state):
+            for sidx, s in enumerate(self.rollouts['states_old']):
+                s.append(current_inner_state[sidx])
+        # TODO: ansemble states, discounti rewards, actions, do update
+
+        if self.cond():
+            if self.learning:
+                self.update()
+        return 0
+
+    def update(self):
+        # learn from experiences
+        feed = self.gen_feed()
+        _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
+        self.update_target()
+
+    def update_target(self):
+        for tu_op in self.target_update_ops:
+            self.sess.run(tu_op)
+
+    def init_target(self):
+        for ti_op in self.target_init_ops:
+            self.sess.run(ti_op)
+
+    def reset_model(self):
+        print("reset model")
+        self.sess.run(self.global_step.assign(0))
+        self.reset_buffer()
+        self.sess.run(tf.initialize_all_variables())
+        self.init_target()
