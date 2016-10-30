@@ -70,6 +70,9 @@ def fc_action(inputs, actions, num_out, num_hids, reuse, trainable, scope=None, 
                     print 'concat'
                     net = tf.concat(1, (net, actions))
                 '''
-            net = tf.concat(1, (net, tf.cast(tf.expand_dims(actions, 1), net.dtype)))
+            if len(actions.get_shape()) == 2:
+                net = tf.concat(1, (net, tf.cast(actions, net.dtype)))
+            elif len(actions.get_shape()) == 1:
+                net = tf.concat(1, (net, tf.cast(tf.expand_dims(actions, 1), net.dtype)))
             net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
             return net

@@ -32,6 +32,7 @@ env = init_world(config['env'])
 MAX_EPISODES = config['MAX_EPISODES']
 MAX_STEPS    = config['MAX_STEPS']
 
+EPISODES_BEFORE_RESET = config['EPISODES_BEFORE_RESET']
 agent = init_agent(config['agent'])(observation_dims=(env.observation_dims,), 
         action_dim=env.action_dim, eps_end=env.eps_end(), 
         learning=learning, config=config)
@@ -43,6 +44,7 @@ try:
     for i_eps in xrange(MAX_EPISODES):
         total_rewards = 0
         state = env.reset()
+        print("start value: %f" % env.sess.run(env.loss))
 
         agent.init_state(state)
         acc_rewards = 0
@@ -50,22 +52,25 @@ try:
             if render: env.render()
             action = agent.action()
             next_state, reward, done, _ = env.step(action)
+            print reward, done, action
             acc_rewards += reward
             #reward = -10 if done else 0.1
-            reward = 5.0 if done else -0.1
+            #reward = 5.0 if done else -0.1
             agent.experience(next_state, reward, done)
             if done: break
 
-        if not done:
+        final_value = env.sess.run(env.loss)
+        if not done and final_value > 10:
             no_reward_since += 1
-            if no_reward_since >= 5:
+            if no_reward_since >= EPISODES_BEFORE_RESET:
                 agent.reset_model()
                 no_reward_since = 0
+                avg_rewards = deque(maxlen=100)
                 continue
         else:
             no_reward_since = 0
         avg_rewards.append(acc_rewards)
-        print("episode %d, mean reward: %f" % (i_eps, np.mean(avg_rewards)))
+        print("episode %d, mean reward: %f, num steps: %d, final value: %f" % (i_eps, np.mean(avg_rewards), t, env.sess.run(env.loss)))
         log_file.write('%f\n' % np.mean(avg_rewards))
 except KeyboardInterrupt:
     print('KeyboardInterrupt')

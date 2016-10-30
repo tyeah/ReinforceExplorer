@@ -12,7 +12,8 @@ def init_agent(agent_name):
             'naive': Agent,
             'policy_gradient': PGAgent,
             'actor_critic': ACAgent,
-            'ddpg': DDPGAgent
+            'ddpg': DDPGAgent,
+            'ddpg_cont': DDPGContAgent,
             }
     return agents[agent_name]
 
@@ -219,7 +220,7 @@ class PGAgent(Agent):
 
     def action(self):
         # tack action based on current state
-        action = self.sess.run(self.action_sampler, feed_dict=dict([(s_t, [s]) for s_t, s in zip(self.t_state, self.inner_state.get_current_state())]))[0][0]
+        action = self.sess.run(self.action_sampler, feed_dict=dict([(s_t, [s]) for s_t, s in zip(self.t_state, self.inner_state.get_current_state())]))[0]
         self.rollouts['actions'].append(action)
         return action
 
@@ -388,7 +389,6 @@ class DDPGAgent(PGAgent):
     def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
         super(DDPGAgent, self).__init__(observation_dims, action_dim, config, eps_end, learning)
         self.init_target()
-        self.acc_memory_size = 0
         self.cond = lambda: self.acc_memory_size >= self.config['batch_size']
 
     def build_model(self):
@@ -505,6 +505,7 @@ class DDPGAgent(PGAgent):
         return feed
 
     def reset_buffer(self):
+        self.acc_memory_size = 0
         ms = self.config['memory_size']
         deque(maxlen=ms)
         self.rollouts = {
@@ -535,6 +536,7 @@ class DDPGAgent(PGAgent):
             for sidx, s in enumerate(self.rollouts['states_old']):
                 s.append(current_inner_state[sidx])
         # TODO: ansemble states, discounti rewards, actions, do update
+        #print self.acc_memory_size, len(self.rollouts['rewards']), len(self.rollouts['actions']), len(self.rollouts['states'][0]), len(self.rollouts['states_old'][0])
 
         if self.cond():
             if self.learning:
@@ -561,3 +563,126 @@ class DDPGAgent(PGAgent):
         self.reset_buffer()
         self.sess.run(tf.initialize_all_variables())
         self.init_target()
+
+
+class DDPGContAgent(DDPGAgent):
+    '''
+    DDPG actor critic
+    '''
+    def __init__(self, observation_dims, action_dim, config, eps_end=None, learning=False):
+        super(DDPGContAgent, self).__init__(observation_dims, action_dim, config, eps_end, learning)
+        #TODO: low/high for action
+
+    def build_model(self):
+        # TODO: should we set exp rate as a placeholder?
+        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_state_new = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,) + self.action_dim) # for action space
+        self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        self.t_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        batch_size = tf.shape(self.t_state)[0]
+        #TODO: only used for discrete action:random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
+
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        '''
+        self.exp_rate = self.config["init_exp_rate"] * (self.config["anneal_base_exp"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_exp"]), tf.float32))
+        '''
+
+        self.exp_rate = tf.cast(tf.maximum(self.config['anneal_step_exp'] - self.global_step, 0), tf.float32) / (1.0 * self.config['anneal_step_exp']) * (self.config["init_exp_rate"] - self.config["min_exp"]) + self.config["min_exp"]
+
+        self.learning_rate = tf.maximum(self.config["init_learning_rate"] * 
+                (self.config["anneal_base_lr"] ** 
+                tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
+                    tf.float32)), self.config["min_lr"])
+
+        self.actor = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
+                inputs=self.t_state, num_out=np.prod(self.action_dim), 
+                scope='actor', 
+                **self.config['estimator_params']['policy_network'])
+        #print self.actor.get_shape(), (-1,) + self.action_dim
+        self.actor = tf.reshape(self.actor, (-1,) + self.action_dim)
+        #TODO:
+        #self.action_scale = 1e-3
+        self.action_scale = 1
+        self.actor *= self.action_scale
+        self.critic = Estimator(self.config['estimator_params']
+                ['value_network']['name']).get_estimator(
+                inputs=self.t_state, actions=self.t_action, num_out=1, 
+                scope='critic', 
+                **self.config['estimator_params']['value_network'])
+
+        self.action_sampler_deterministic = self.actor
+
+        self.action_sampler = self.actor + tf.random_normal(tf.shape(self.actor), stddev=self.exp_rate)
+
+        actor_target_config = deepcopy(self.config['estimator_params']['policy_network'])
+        actor_target_config['trainable'] = False
+        self.actor_target = Estimator(self.config['estimator_params']
+                ['policy_network']['name']).get_estimator(
+                inputs=self.t_state_new, num_out=np.prod(self.action_dim), 
+                scope='actor_target',
+                **actor_target_config)
+        #print self.actor_target.get_shape(), (-1,) + self.action_dim
+        self.actor_target = tf.reshape(self.actor_target, (-1,) + self.action_dim)
+        self.actor_target *= self.action_scale
+        critic_target_config = deepcopy(self.config['estimator_params']['policy_network'])
+        critic_target_config['trainable'] = False
+        self.critic_target = Estimator(self.config['estimator_params']
+                ['value_network']['name']).get_estimator(
+                inputs=self.t_state_new, actions=self.action_sampler_deterministic, num_out=1, 
+                scope='critic_target',
+                **critic_target_config)
+
+        actor_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="actor")])
+        critic_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="critic")])
+        actor_target_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="actor_target")])
+        critic_target_variables = dict([('/'.join(v.name.split('/')[1:]), v) 
+                for v in tf.get_collection(
+                tf.GraphKeys.VARIABLES, scope="critic_target")])
+
+        self.target_init_ops = []
+        for k, v in actor_variables.iteritems():
+            self.target_init_ops.append(actor_target_variables[k].assign(v))
+        for k, v in critic_variables.iteritems():
+            self.target_init_ops.append(critic_target_variables[k].assign(v))
+        self.target_update_ops = []
+        tau = self.config["tau"]
+        for k, v in actor_variables.iteritems():
+            self.target_update_ops.append(actor_target_variables[k].assign(
+                tau * v + (1.0 - tau) * actor_target_variables[k]))
+        for k, v in critic_variables.iteritems():
+            self.target_update_ops.append(critic_target_variables[k].assign(
+                tau * v + (1.0 - tau) * critic_target_variables[k]))
+
+        self.actor_loss = tf.reduce_mean(self.critic_target)
+        self.target = self.t_reward + self.config["discount_rate"] * self.critic_target
+        self.critic_loss = tf.reduce_mean(self.target - self.critic)
+
+        self.add_reg(actor_variables.values())
+        self.add_reg(critic_variables.values())
+        self.loss = (self.actor_loss + self.critic_loss)
+        self.loss += self.reg_loss
+        self.build_train()
+
+    def update(self):
+        # learn from experiences
+        feed = self.gen_feed()
+        '''
+        for k, v in feed.iteritems():
+            if type(v) == list:
+                print v[0].shape
+        '''
+        _, loss, global_step = self.sess.run([self.train_op, self.loss, self.global_step], feed_dict=feed)
+        self.update_target()
+        if global_step % self.config["save_step"] == 0 and global_step > 0:
+            filename = self.save_file# + '-%d' % global_step
+            print "save to %s" % filename
+            self.saver.save(self.sess, filename)
