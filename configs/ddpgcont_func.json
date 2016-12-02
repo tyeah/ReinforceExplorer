@@ -21,18 +21,18 @@
         "store_size": 50,
         "memory_size": 64,
         "batch_size": 8,
-        "save_step": 5000,
+        "save_step": 500000,
         "save_dir": "weights/ddpgcont",
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
                 "name": "fc", 
-                "num_hids": [20],
+                "num_hids": [200],
                 "trainable": true
              },
             "value_network": {
                 "name": "fc_action", 
-                "num_hids": [20],
+                "num_hids": [200],
                 "trainable": true
              }
         },
