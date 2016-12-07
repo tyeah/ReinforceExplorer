@@ -3,7 +3,7 @@ import numpy as np
 from inner_states import init_inner_state, InnerState
 from estimators import Estimator
 from collections import deque
-import os
+import os, sys
 from copy import deepcopy
 
 
@@ -517,6 +517,14 @@ class DDPGAgent(PGAgent):
 
     def init_state(self, state):
         self.inner_state = init_inner_state(state, **self.config['inner_state_params'])
+        '''
+        print '-' * 80
+        print len(self.inner_state.current_state[0]), type(self.inner_state.current_state[0])
+        print self.inner_state.current_state[0][0]
+        print '-' * 80
+        print self.inner_state.current_state[0][1]
+        sys.exit()
+        '''
         current_inner_state = self.inner_state.get_current_state()
         for sidx, s in enumerate(self.rollouts['states_old']):
             s.append(current_inner_state[sidx])
@@ -546,6 +554,8 @@ class DDPGAgent(PGAgent):
     def update(self):
         # learn from experiences
         feed = self.gen_feed()
+        print [v.name for v in feed]
+        sys.exit()
         _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
         self.update_target()
 

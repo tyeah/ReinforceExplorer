@@ -6,7 +6,7 @@ from collections import deque
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-g', '--gpu', type=str, default='-1')
-parser.add_argument('-c', '--config', type=str, default='configs/pg_cartPole.json')
+parser.add_argument('-c', '--config', type=str, default='configs/ddpgcont_func.json')
 parser.add_argument('-w', '--weights', type=str, default=None)
 parser.add_argument('-s', '--save_dir', type=str, default=None)
 parser.add_argument('-r', '--render', action='store_true', default=False)
@@ -28,7 +28,10 @@ json.dump(config, open(args.save_dir + '/config.json', 'w'), indent=4)
 config['weights'] = args.weights
 config['save_dir'] = args.save_dir
 
-env = init_world(config['env'])
+if 'env_config' in config:
+    env = init_world(config['env'], **config['env_config'])
+else:
+    env = init_world(config['env'])
 MAX_EPISODES = config['MAX_EPISODES']
 MAX_STEPS    = config['MAX_STEPS']
 

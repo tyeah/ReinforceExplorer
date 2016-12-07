@@ -3,28 +3,29 @@ import numpy as np
 import gym
 from estimators import Estimator
 
-def init_world(name):
+def init_world(name, **kwargs):
     worlds = {
             'gym_world': GymWorld,
             'Pong-v0': PongWorld,
             'function': FunctionWorld
             }
     if name not in worlds:
-        return worlds['gym_world'](name)
+        return worlds['gym_world'](name, **kwargs)
     else:
-        return worlds[name](name)
+        return worlds[name](name, **kwargs)
 
 class World(object):
-    def __init__(self, name):
+    def __init__(self, name, **kwargs):
         self.name = name
+        self.kwargs = kwargs
 
     def eps_end(self):
         return None
 
 class GymWorld(World):
     def __init__(self, name):
-        super(GymWorld, self).__init__(name)
-        self.env = gym.make(name)
+        super(GymWorld, self).__init__(name, **kwargs)
+        self.env = gym.make(name, **kwargs)
         self.action_space = self.env.action_space
         self.action_dim = self.env.action_space.n
         self.step = self.env.step
@@ -38,8 +39,8 @@ class GymWorld(World):
         return ee
 
 class PongWorld(GymWorld):
-    def __init__(self, name):
-        super(PongWorld, self).__init__(name)
+    def __init__(self, name, **kwargs):
+        super(PongWorld, self).__init__(name, **kwargs)
 
     def eps_end(self):
         def ee(done, reward, state=None):
@@ -69,9 +70,9 @@ class ContSpace(object):
 
 class Function(object):
     # Function to be optimized
-    def __init__(self):
+    def __init__(self, **kwargs):
         # build model to be optimized
-        pass
+        self.kwargs = kwargs
 
     def gen_feed(self):
         pass
@@ -81,18 +82,35 @@ class Function(object):
                 [tf.expand_dims(tf.concat(0, self.variables), 0), 
                 tf.expand_dims(tf.concat(0, self.grads), 0)])
 
+    def dist_grads(self, grads_flatten):
+        return [(tf.reshape(grads_flatten[self.dims_bins[i]: self.dims_bins[i+1]], 
+            self.dims[i]), v)  
+            for i, v in enumerate(self.variables)]
+
+
     def build_train(self):
         self.grads = tf.gradients(self.loss, self.variables)
         self.grad_scale = tf.reduce_sum([tf.nn.l2_loss(g) for g in self.grads])
         self.num_vars = len(self.variables)
+        self.dims = [v.get_shape().as_list() for v in self.variables]
+        self.dims_bins = np.cumsum([0] + [np.prod(d) for d in self.dims])
+        if self.kwargs['action'] == 'learning_rate':
+            self.num_actions = self.num_vars
+        elif self.kwargs['action'] == 'step':
+            self.num_actions = sum([np.prod(d) for d in self.dims])
+        self.action_low, self.action_high  = np.array([0] * self.num_vars), np.array([1] * self.num_vars)
 
         optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
                 decay=0.9)
-        self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_vars, name='train')
-        self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
+        self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_actions, name='train')
+        if self.kwargs['action'] == 'learning_rate':
+            self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
+        if self.kwargs['action'] == 'step':
+            self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
 
 class SimpleFunction(Function):
-    def __init__(self):
+    def __init__(self, **kwargs):
+        super(SimpleFunction, self).__init__(**kwargs)
         with tf.variable_scope('Variables'):
             self.w = tf.get_variable('w', 
                     (10,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
@@ -108,7 +126,8 @@ class SimpleFunction(Function):
         return {}
 
 class SimpleNNFunction(Function):
-    def __init__(self):
+    def __init__(self, **kwargs):
+        super(SimpleNNFunction, self).__init__(**kwargs)
         self.X, self.y, ydim = self.gen_data()
         self.t_X = tf.placeholder(dtype=tf.float32, shape=(None, self.X.shape[1]), name='X')
         self.t_y = tf.placeholder(dtype=tf.int32, shape=(None,), name='y')
@@ -133,9 +152,12 @@ class SimpleNNFunction(Function):
         for v, g in zip(self.variables, self.grads):
             variables.append(tf.reshape(v, (-1,)))
             grads.append(tf.reshape(g, (-1,)))
-        self.state = tf.concat(0, 
-                [tf.expand_dims(tf.concat(0, variables), 0), 
-                tf.expand_dims(tf.concat(0, grads), 0)])
+        if "state" in self.kwargs and self.kwargs['state'] == 'gradient':
+            self.state = tf.expand_dims(tf.concat(0, grads), 0)
+        else:
+            self.state = tf.concat(0, 
+                    [tf.expand_dims(tf.concat(0, variables), 0), 
+                    tf.expand_dims(tf.concat(0, grads), 0)])
 
     def gen_feed(self):
         return {self.t_X: self.X, self.t_y: self.y}
@@ -153,12 +175,13 @@ class SimpleNNFunction(Function):
         return X, y, ydim
 
 class FunctionWorld(World):
-    def __init__(self, name):
+    def __init__(self, name, **kwargs):
         # experiment to learn sgd
-        super(FunctionWorld, self).__init__(name)
+        super(FunctionWorld, self).__init__(name, **kwargs)
         self.stop_thres = 1e-1
         #self.Func = SimpleFunction()
-        self.Func = SimpleNNFunction()
+        if 'func' not in kwargs or kwargs['func'] == 'symplenn':
+            self.Func = SimpleNNFunction(**kwargs)
         self.variables = self.Func.variables
         self.loss = self.Func.loss
         self.train_op = self.Func.train_op
@@ -166,8 +189,9 @@ class FunctionWorld(World):
         self.state = self.Func.state
         self.num_vars = self.Func.num_vars
         self.grad_scale = self.Func.grad_scale
+        self.num_actions = self.Func.num_actions
 
-        self.action_low, self.action_high  = np.array([0] * self.num_vars), np.array([1] * self.num_vars)
+        self.action_low, self.action_high  = np.array([0] * self.num_actions), np.array([1] * self.num_actions)
         self.action_space = ContSpace(self.action_low.shape, self.action_low, self.action_high)
         self.action_dim = self.action_space.shape
         self.observation_space = ContSpace(self.state.get_shape().as_list())
@@ -186,8 +210,12 @@ class FunctionWorld(World):
         return state
 
     def eps_end(self):
-        def ee(done, reward, state=None):
-            return np.sum(state[1] ** 2) < self.stop_thres
+        if self.kwargs['state'] == 'gradient':
+            def ee(done, reward, state=None):
+                return np.sum(state[0] ** 2) < self.stop_thres
+        if self.kwargs['state'] == 'variable_gradient':
+            def ee(done, reward, state=None):
+                return np.sum(state[1] ** 2) < self.stop_thres
         return ee
 
     def step(self, action):

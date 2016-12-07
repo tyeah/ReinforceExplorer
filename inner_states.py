@@ -36,6 +36,7 @@ class MultiStepInnerState(object):
     '''
     def __init__(self, state, num_steps, **kwargs):
         state_list = utils.to_list(state)
+        #print state_list
         self.num_steps = num_steps
         self.range_step = range(num_steps)
         self.num_states = len(state_list)
@@ -45,9 +46,10 @@ class MultiStepInnerState(object):
         self.old_state = [deque(maxlen=num_steps) for _ in self.range_state]
         for _ in self.range_step:
             for qidx in self.range_state:
-                self.current_state[qidx].append(state)
-                self.old_state[qidx].append(state)
-        self.current_state.append(state_list)
+                self.current_state[qidx].append(state_list[qidx])
+                self.old_state[qidx].append(state_list[qidx])
+        #self.current_state.append(state_list)
+        #print self.current_state
         #self.num_states = len(current_state[-1]) if utils.multi_state(state) else 1
         self.num_states = len(self.current_state[-1])
         self.state_dims = [len(s.shape) for s in state_list]

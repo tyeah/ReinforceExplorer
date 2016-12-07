@@ -2,8 +2,8 @@
         "env": "function",
         "env_config" : {
             "func": "symplenn",
-            "action": "learning_rate",
-            "state": "variable_gradient"
+            "action": "step",
+            "state": "gradient"
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,
@@ -27,7 +27,7 @@
         "memory_size": 64,
         "batch_size": 8,
         "save_step": 500000,
-        "save_dir": "weights/ddpgcont",
+        "save_dir": "weights/ddpgcont_parallel",
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
@@ -43,6 +43,6 @@
         },
         "inner_state_params": {
             "name": "multi_step_inner_state",
-            "num_steps": 2
+            "num_steps": 5
         }
 }
