@@ -142,7 +142,7 @@ class SimpleNNFunction(Function):
                 **estimator_params)
         self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                 self.logits , self.t_y))
-        self.variables = tf.trainable_variables()
+        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='World')
         self.build_train()
         self.build_state()
 
@@ -154,6 +154,7 @@ class SimpleNNFunction(Function):
             grads.append(tf.reshape(g, (-1,)))
         if "state" in self.kwargs and self.kwargs['state'] == 'gradient':
             self.state = tf.expand_dims(tf.concat(0, grads), 0)
+            #self.state = [tf.expand_dims(g, 0) for g in grads]
         else:
             self.state = tf.concat(0, 
                     [tf.expand_dims(tf.concat(0, variables), 0), 
@@ -180,8 +181,9 @@ class FunctionWorld(World):
         super(FunctionWorld, self).__init__(name, **kwargs)
         self.stop_thres = 1e-1
         #self.Func = SimpleFunction()
-        if 'func' not in kwargs or kwargs['func'] == 'symplenn':
-            self.Func = SimpleNNFunction(**kwargs)
+        with tf.variable_scope('World'):
+            if 'func' not in kwargs or kwargs['func'] == 'symplenn':
+                self.Func = SimpleNNFunction(**kwargs)
         self.variables = self.Func.variables
         self.loss = self.Func.loss
         self.train_op = self.Func.train_op

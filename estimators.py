@@ -79,40 +79,35 @@ def fc_action(inputs, actions, num_out, num_hids, reuse, trainable, scope=None, 
             net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
             return net
 
-def parallel(inputs, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None, **kwargs):
+def parallel(inputs, reuse, trainable, scope=None, **kwargs):
     net = inputs
+    num_features = kwargs['num_features']
+    net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
     if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                 trainable=trainable,
+                padding='VALID',
                 activation_fn=tf.nn.relu):
-            for nl in xrange(num_cnn_layers):
-                net = slim.conv2d(net, 32, [3, 3], reuse=reuse, scope='conv%d' % (nl + 1))
-                net = slim.max_pool2d(net, 2)
-            net = slim.flatten(net)
-            for nl in xrange(num_fc_layers - 1):
-                fc_num_out = net.get_shape().as_list()[-1]
-                assert fc_num_out >= 2
-                fc_num_out = int(fc_num_out / 2)
-                net = slim.fully_connected(net, fc_num_out, scope='fc_out%d' % (nl + 1))
-            net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
+            for nl, nh in enumerate(kwargs['num_hids']):
+                net = slim.conv2d(net, nh, [num_features if nl == 0 else 1, 1], reuse=reuse, scope='conv%d' % (nl + 1))
+            net = slim.conv2d(net, 1, [1, 1], reuse=reuse, activation_fn=None, scope='fc')
+            net = tf.reshape(net, (tf.shape(net)[0], 1, -1))
             return net
 
-def parallel_action(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None, **kwargs):
+def parallel_action(inputs, actions, reuse, trainable, scope=None, **kwargs):
     net = inputs
-    if scope == None: scope = 'cnn'
+    num_features = kwargs['num_features']
+    net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
+    if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                 trainable=trainable,
+                padding='VALID',
                 activation_fn=tf.nn.relu):
-            for nl in xrange(num_cnn_layers):
-                net = slim.conv2d(net, 32, [3, 3], reuse=reuse, scope='conv%d' % (nl + 1))
-                net = slim.max_pool2d(net, 2)
-            net = slim.flatten(net)
-            for nl in xrange(num_fc_layers - 1):
-                fc_num_out = net.get_shape().as_list()[-1]
-                assert fc_num_out >= 2
-                fc_num_out = int(fc_num_out / 2)
-                net = slim.fully_connected(net, fc_num_out, scope='fc_out%d' % (nl + 1))
-            net = slim.fully_connected(slim.flatten(net), num_out, scope='fc_out_2', activation_fn=None)
+            for nl, nh in enumerate(kwargs['num_hids']):
+                net = slim.conv2d(net, nh, [num_features if nl == 0 else 1, 1], reuse=reuse, scope='conv%d' % (nl + 1))
+            net = tf.concat(3, (net, tf.cast(tf.reshape(actions, (tf.shape(net)[0], 1, -1, 1)), net.dtype)))
+            net = slim.conv2d(net, 1, [1, 1], reuse=reuse, activation_fn=None, scope='fc')
+            net = tf.reshape(net, (tf.shape(net)[0], 1, -1))
             return net

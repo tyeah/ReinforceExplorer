@@ -31,13 +31,15 @@
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
-                "name": "fc", 
-                "num_hids": [200],
+                "name": "parallel", 
+                "num_hids": [20],
+                "num_features": 5,
                 "trainable": true
              },
             "value_network": {
-                "name": "fc_action", 
-                "num_hids": [200],
+                "name": "parallel_action", 
+                "num_hids": [20],
+                "num_features": 5,
                 "trainable": true
              }
         },

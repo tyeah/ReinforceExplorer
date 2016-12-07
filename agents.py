@@ -487,11 +487,18 @@ class DDPGAgent(PGAgent):
     def build_train(self):
         optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
                 decay=0.9)
-        tvars = tf.trainable_variables()
+        tvars = [v for v in self.loss.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+                if not v.name.startswith('World')]
         if self.config["clip_norm"] <= 0:
             grads = tf.gradients(self.loss, tvars)
         else:
             grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.config["clip_norm"])
+            print self.loss, self.loss.get_shape(), len(tvars), type(self.loss)
+        for i, g in enumerate(grads):
+            if g is not None:
+                print g.get_shape(), tvars[i].get_shape(), tvars[i].name
+            else:
+                print None, tvars[i].get_shape(), tvars[i].name
         self.train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
     def gen_feed(self):
@@ -554,7 +561,7 @@ class DDPGAgent(PGAgent):
     def update(self):
         # learn from experiences
         feed = self.gen_feed()
-        print [v.name for v in feed]
+        #print [v.name for v in feed]
         sys.exit()
         _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
         self.update_target()
@@ -586,6 +593,7 @@ class DDPGContAgent(DDPGAgent):
     def build_model(self):
         # TODO: should we set exp rate as a placeholder?
         self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        #print self.t_state[0].get_shape(), self.observation_dims, self.action_dim
         self.t_state_new = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
         self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,) + self.action_dim) # for action space
         self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
@@ -673,7 +681,10 @@ class DDPGContAgent(DDPGAgent):
                 tau * v + (1.0 - tau) * critic_target_variables[k]))
 
         self.actor_loss = tf.reduce_mean(self.critic_target)
-        self.target = self.t_reward + self.config["discount_rate"] * self.critic_target
+        print self.t_reward.get_shape(), self.critic_target.get_shape(), self.critic.get_shape()
+        self.target = tf.reshape(self.t_reward, \
+                [-1] + [1] * (self.critic.get_shape().ndims - 1))\
+                + self.config["discount_rate"] * self.critic_target
         self.critic_loss = tf.reduce_mean(self.target - self.critic)
 
         self.add_reg(actor_variables.values())
