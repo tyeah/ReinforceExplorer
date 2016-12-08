@@ -38,6 +38,24 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
                     self.reuse = True
                 return output, output
 
+def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
+
+  num_features = kwargs['num_features']
+  input_shape = tf.shape(inputs)
+  batch_size = input_shape[0]
+  num_variables = input_shape[2]
+  if scope == None: scope = 'rnn'
+  with tf.variable_scope(scope, reuse=reuse):
+    state = tf.zeros([batch_size, num_variables])
+    outputs = []
+    for idx in range(num_features):
+      state, output = ConvGRUCell(inputs[:,idx,:,0], state, scope=scope, trainable=trainable, num_outputs=num_out)
+      outputs.append(output)
+
+    outputs = tf.pack(outputs)
+    outputs = tf.reshape(outputs, [batch_size, num_features, num_variables, num_out)
+
+  return outputs 
 
 # function approximators: v(s) or pi(s)
 class Estimator(object):
@@ -64,24 +82,6 @@ class Estimator(object):
         self.reuse = True
         return ret
 
-def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
-
-  num_features = kwargs['num_features']
-  input_shape = tf.shape(inputs)
-  batch_size = input_shape[0]
-  num_variables = input_shape[2]
-  if scope == None: scope = 'rnn'
-  with tf.variable_scope(scope, reuse=reuse):
-    state = tf.zeros([batch_size, num_variables])
-    outputs = []
-    for idx in range(num_features):
-      state, output = ConvGRUCell(inputs[:,idx,:,0], state, scope=scope, trainable=trainable, num_outputs=num_out)
-      outputs.append(output)
-
-    outputs = tf.pack(outputs)
-    outputs = tf.reshape(outputs, [batch_size, num_features, num_variables, num_out)
-
-  return outputs 
        
 def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None, **kwargs):
     net = inputs
