@@ -47,7 +47,7 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
   gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
   if scope == None: scope = 'rnn'
   with tf.variable_scope(scope, reuse=reuse):
-    state = tf.zeros([batch_size, num_variables])
+    state = tf.zeros([batch_size, num_variables, num_out])
     outputs = []
     for idx in range(num_features):
       state, output = gru(inputs[:,idx,:,0], state, scope=scope)
