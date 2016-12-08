@@ -1,6 +1,44 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
 
+
+class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
+    def __init__(self, out_shape, **kwargs):
+        self.kwargs = kwargs
+        self.reuse = False
+        self.out_shape = out_shape
+        self.trainable = kwargs.get('trainable', True)
+
+    @property
+    def state_size(self):
+        return self.out_shape
+    @property
+    def output_size(self):
+        return self.out_shape
+
+    def __call__(self, inputs, state, scope=None):
+        with tf.variable_scope(scope or type(self).__name__, reuse=self.reuse):
+            #assert self.inputs_shape == tuple(inputs.get_shape().as_list()[2:])
+            with slim.arg_scope([slim.conv2d], 
+                    num_outputs=self.kwargs.get('num_outputs', self.out_shape[-1]),
+                    kernel_size=self.kwargs.get('kernel_size', 1),
+                    stride=1,
+                    padding='SAME',
+                    activation_fn=None,
+                    biases_initializer=None, # zero bias
+                    trainable=self.trainable):
+                state_ = tf.reshape(state, (-1,) + tuple(self.out_shape))
+                z = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
+                r = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
+                hc = tf.nn.tanh(slim.conv2d(inputs) + slim.conv2d(r * state_))
+                h = (1 - z) * state_ + z * hc
+                #output = tf.flatten(h)
+                output = h
+                if not self.reuse:
+                    self.reuse = True
+                return output, output
+
+
 # function approximators: v(s) or pi(s)
 class Estimator(object):
     def __init__(self, fn_name):
@@ -20,10 +58,31 @@ class Estimator(object):
         if len(inputs) == 1:
             ret = self.est_fn(inputs[0], reuse=self.reuse, **kwargs)
         else:
+            if kwargs['rnn_preprocess']:
+              inputs = rnn_preprocess(inputs, kwargs['num_out'], True, reuse, scope='rnn', **kwargs)
             ret = self.est_fn(inputs, reuse=self.reuse, **kwargs)
         self.reuse = True
         return ret
 
+def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
+
+  num_features = kwargs['num_features']
+  input_shape = tf.shape(inputs)
+  batch_size = input_shape[0]
+  num_variables = input_shape[2]
+  if scope == None: scope = 'rnn'
+  with tf.variable_scope(scope, reuse=reuse):
+    state = tf.zeros([batch_size, num_variables])
+    outputs = []
+    for idx in range(num_features):
+      state, output = ConvGRUCell(inputs[:,idx,:,0], state, scope=scope, trainable=trainable, num_outputs=num_out)
+      outputs.append(output)
+
+    outputs = tf.pack(outputs)
+    outputs = tf.reshape(outputs, [batch_size, num_features, num_variables, num_out)
+
+  return outputs 
+       
 def cnn(inputs, num_out, num_cnn_layers, num_fc_layers, reuse, trainable, scope=None, **kwargs):
     net = inputs
     if scope == None: scope = 'cnn'
