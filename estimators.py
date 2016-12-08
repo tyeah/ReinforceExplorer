@@ -51,7 +51,7 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
     inputs = tf.unpack(inputs)
     outputs, states = tf.nn.rnn[gru, inputs, dtype = tf.float32)
 
-    output = tf.reshape(output[-1], [batch_size, num_variables, num_out])
+    output = tf.reshape(outputs[-1], [batch_size, num_variables, num_out])
 
   return output
 
