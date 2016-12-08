@@ -45,7 +45,7 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
   batch_size = input_shape[0]
   num_variables = input_shape[2]
   if scope == None: scope = 'rnn'
-  with tf.variable_scope(scope, reuse=):
+  with tf.variable_scope(scope, reuse=resue):
     gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
     inputs = tf.rehsape(inputs, [num_features, batch_size, num_variables, -1])
     inputs = tf.unpack(inputs)
