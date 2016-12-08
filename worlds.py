@@ -90,7 +90,8 @@ class Function(object):
 
     def build_train(self):
         self.grads = tf.gradients(self.loss, self.variables)
-        self.grad_scale = tf.reduce_sum([tf.nn.l2_loss(g) for g in self.grads])
+        #self.grad_scale = tf.reduce_sum([tf.nn.l2_loss(g) for g in self.grads])
+        self.grad_scale = tf.reduce_mean([tf.reduce_mean(tf.abs(g)) for g in self.grads])
         self.num_vars = len(self.variables)
         self.dims = [v.get_shape().as_list() for v in self.variables]
         self.dims_bins = np.cumsum([0] + [np.prod(d) for d in self.dims])
@@ -102,6 +103,7 @@ class Function(object):
 
         optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
                 decay=0.9)
+        #optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
         self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_actions, name='train')
         if self.kwargs['action'] == 'learning_rate':
             self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
@@ -119,6 +121,23 @@ class SimpleFunction(Function):
         self.variables = tf.get_collection(tf.GraphKeys.VARIABLES, scope="Variables")
         self.loss = tf.reduce_sum([tf.reduce_sum(tf.sin(v) + tf.square(v)) for v in self.variables])
         #self.loss = tf.reduce_sum(self.w)
+        self.build_train()
+        self.build_state()
+
+class QuadraticFunction(Function):
+    def __init__(self, **kwargs):
+        super(QuadraticFunction, self).__init__(**kwargs)
+        num_vars = 10
+        A0 = np.random.randn(num_vars, num_vars).astype('float32')
+        A = A0.T.dot(A0)
+        b = np.random.randn(num_vars).astype('float32')
+        with tf.variable_scope('Variables'):
+            self.x = tf.get_variable('x', 
+                    (num_vars,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
+        self.loss = tf.reshape(tf.matmul(tf.reshape(self.x, (1, -1)), 
+            tf.matmul(A, tf.reshape(self.x, (-1, 1))))
+            , (1,))+ tf.reduce_sum(b * self.x)
+        self.variables = tf.get_collection(tf.GraphKeys.VARIABLES, scope="World")
         self.build_train()
         self.build_state()
 
@@ -164,7 +183,7 @@ class SimpleNNFunction(Function):
         return {self.t_X: self.X, self.t_y: self.y}
 
     def gen_data(self):
-        size = 400
+        size = 40
         ydim = 5
         Xdim = 2
         X_base = np.random.rand(ydim, Xdim) * 20
@@ -179,11 +198,13 @@ class FunctionWorld(World):
     def __init__(self, name, **kwargs):
         # experiment to learn sgd
         super(FunctionWorld, self).__init__(name, **kwargs)
-        self.stop_thres = 1e-1
+        self.stop_thres = 1e-2
         #self.Func = SimpleFunction()
         with tf.variable_scope('World'):
             if 'func' not in kwargs or kwargs['func'] == 'symplenn':
                 self.Func = SimpleNNFunction(**kwargs)
+            if 'func' not in kwargs or kwargs['func'] == 'quad':
+                self.Func = QuadraticFunction(**kwargs)
         self.variables = self.Func.variables
         self.loss = self.Func.loss
         self.train_op = self.Func.train_op
@@ -232,10 +253,24 @@ class FunctionWorld(World):
         inc = (self.last_value - value)
         self.last_value = value
         #print "grad_scale: %f, value: %f" % (grad_scale, value)
+        if grad_scale < self.stop_thres:
+            done = True
+            reward = inc + self.init_value - value
+        elif value - self.init_value > 200:
+            #done = True
+            #reward = - 1000
+            done = False
+            reward = inc
+        else:
+            done = False
+            reward = inc
+        #print value, reward, grad_scale
+        '''
         done = grad_scale < self.stop_thres
         #reward = inc / grad_scale if not done else inc / grad_scale - self.step_counter
         #reward = inc if not done else inc - self.step_counter
         reward = inc if not done else inc + self.init_value - value
+        '''
         self.step_counter += 1
         #reward = -1 #TODO
         return state, reward, done, None

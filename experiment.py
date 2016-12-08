@@ -1,4 +1,4 @@
-import gym, os, json, argparse
+import gym, os, sys, json, argparse
 import numpy as np
 from agents import init_agent
 from worlds import init_world
@@ -54,7 +54,12 @@ try:
         for t in xrange(MAX_STEPS):
             if render: env.render()
             action = agent.action()
+            #print action.shape, type(action)
+            #print type(state), state.shape
+            #sys.exit()
+            #action = 0.001 * state.reshape(-1)
             next_state, reward, done, _ = env.step(action)
+            #print env.last_value
             #print reward, done, action
             acc_rewards += reward
             #reward = -10 if done else 0.1
@@ -63,7 +68,7 @@ try:
             if done: break
 
         final_value = env.last_value
-        if not done and final_value > 20:
+        if not done and final_value > 100:
             no_reward_since += 1
             if no_reward_since >= EPISODES_BEFORE_RESET:
                 agent.reset_model()
@@ -73,7 +78,7 @@ try:
         else:
             no_reward_since = 0
         avg_rewards.append(acc_rewards)
-        print("episode %d, mean reward: %f, num steps: %d, final value: %f" % (i_eps, np.mean(avg_rewards), t, env.last_value))
+        print("episode %d, episode reward: %f, mean reward: %f, num steps: %d, final value: %f" % (i_eps, acc_rewards, np.mean(avg_rewards), t, env.last_value))
         log_file.write('%f\n' % np.mean(avg_rewards))
 except KeyboardInterrupt:
     print('KeyboardInterrupt')

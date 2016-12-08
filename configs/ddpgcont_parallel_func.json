@@ -32,19 +32,19 @@
         "estimator_params": {
             "policy_network": {
                 "name": "parallel", 
-                "num_hids": [20],
-                "num_features": 5,
+                "num_hids": [30, 20],
+                "num_features": 10,
                 "trainable": true
              },
             "value_network": {
                 "name": "parallel_action", 
-                "num_hids": [20],
-                "num_features": 5,
+                "num_hids": [30, 20],
+                "num_features": 10,
                 "trainable": true
              }
         },
         "inner_state_params": {
             "name": "multi_step_inner_state",
-            "num_steps": 5
+            "num_steps": 10
         }
 }
