@@ -49,7 +49,7 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
     gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
     inputs = tf.rehsape(inputs, [num_features, batch_size, num_variables, -1])
     inputs = tf.unpack(inputs)
-    outputs, states = tf.nn.rnn[gru, inputs, dtype = tf.float32)
+    outputs, states = tf.nn.rnn(gru, inputs, dtype = tf.float32)
 
     output = tf.reshape(outputs[-1], [batch_size, num_variables, num_out])
 

@@ -592,12 +592,22 @@ class DDPGContAgent(DDPGAgent):
 
     def build_model(self):
         # TODO: should we set exp rate as a placeholder?
-        self.t_state = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
+        self.t_state = [tf.placeholder(dtype=tf.float32, 
+            name='t_state_%d' % i,
+            shape=(None,) + od[:-1] + (od[-1] * 
+            self.config["inner_state_params"].get("num_steps", 1),)) 
+            for i, od in enumerate(self.observation_dims)]
         #print self.t_state[0].get_shape(), self.observation_dims, self.action_dim
-        self.t_state_new = [tf.placeholder(dtype=tf.float32, shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].get("num_steps", 1),)) for od in self.observation_dims]
-        self.t_action = tf.placeholder(dtype=tf.int32, shape=(None,) + self.action_dim) # for action space
-        self.t_discounted_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
-        self.t_reward = tf.placeholder(dtype=tf.float32, shape=(None,))
+        self.t_state_new = [tf.placeholder(dtype=tf.float32, 
+            name='t_state_new_%d' % i,
+            shape=(None,) + od[:-1] + (od[-1] * self.config["inner_state_params"].
+                get("num_steps", 1),)) for i, od in enumerate(self.observation_dims)]
+        self.t_action = tf.placeholder(dtype=tf.int32, name='t_action', 
+                shape=(None,) + self.action_dim) # for action space
+        self.t_discounted_reward = tf.placeholder(dtype=tf.float32, 
+                name='t_discounted_reward', shape=(None,))
+        self.t_reward = tf.placeholder(dtype=tf.float32, 
+                name='t_reward', shape=(None,))
         batch_size = tf.shape(self.t_state)[0]
         #TODO: only used for discrete action:random_action_probs = tf.fill((batch_size, self.action_dim), 1.0 / self.action_dim)
 
@@ -698,8 +708,10 @@ class DDPGContAgent(DDPGAgent):
         feed = self.gen_feed()
         '''
         for k, v in feed.iteritems():
+            print k.name
             if type(v) == list:
-                print v[0].shape
+                print v[0].shape, len(v)
+        sys.exit(0)
         '''
         _, loss, global_step = self.sess.run([self.train_op, self.loss, self.global_step], feed_dict=feed)
         self.update_target()

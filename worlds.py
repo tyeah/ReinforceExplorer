@@ -101,14 +101,28 @@ class Function(object):
             self.num_actions = sum([np.prod(d) for d in self.dims])
         self.action_low, self.action_high  = np.array([0] * self.num_vars), np.array([1] * self.num_vars)
 
-        optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
-                decay=0.9)
-        #optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
+        #optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
+        #        decay=0.9)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
         self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_actions, name='train')
         if self.kwargs['action'] == 'learning_rate':
             self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
         if self.kwargs['action'] == 'step':
             self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
+
+    def build_state(self):
+        variables = []
+        grads = []
+        for v, g in zip(self.variables, self.grads):
+            variables.append(tf.reshape(v, (-1,)))
+            grads.append(tf.reshape(g, (-1,)))
+        if "state" in self.kwargs and self.kwargs['state'] == 'gradient':
+            self.state = tf.expand_dims(tf.concat(0, grads), 0)
+            #self.state = [tf.expand_dims(g, 0) for g in grads]
+        else:
+            self.state = tf.concat(0, 
+                    [tf.expand_dims(tf.concat(0, variables), 0), 
+                    tf.expand_dims(tf.concat(0, grads), 0)])
 
 class SimpleFunction(Function):
     def __init__(self, **kwargs):
@@ -134,9 +148,8 @@ class QuadraticFunction(Function):
         with tf.variable_scope('Variables'):
             self.x = tf.get_variable('x', 
                     (num_vars,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
-        self.loss = tf.reshape(tf.matmul(tf.reshape(self.x, (1, -1)), 
-            tf.matmul(A, tf.reshape(self.x, (-1, 1))))
-            , (1,))+ tf.reduce_sum(b * self.x)
+        self.loss = tf.squeeze(tf.matmul(tf.reshape(self.x, (1, -1)), 
+            tf.matmul(A, tf.reshape(self.x, (-1, 1))))) + tf.reduce_sum(b * self.x)
         self.variables = tf.get_collection(tf.GraphKeys.VARIABLES, scope="World")
         self.build_train()
         self.build_state()
@@ -165,20 +178,6 @@ class SimpleNNFunction(Function):
         self.build_train()
         self.build_state()
 
-    def build_state(self):
-        variables = []
-        grads = []
-        for v, g in zip(self.variables, self.grads):
-            variables.append(tf.reshape(v, (-1,)))
-            grads.append(tf.reshape(g, (-1,)))
-        if "state" in self.kwargs and self.kwargs['state'] == 'gradient':
-            self.state = tf.expand_dims(tf.concat(0, grads), 0)
-            #self.state = [tf.expand_dims(g, 0) for g in grads]
-        else:
-            self.state = tf.concat(0, 
-                    [tf.expand_dims(tf.concat(0, variables), 0), 
-                    tf.expand_dims(tf.concat(0, grads), 0)])
-
     def gen_feed(self):
         return {self.t_X: self.X, self.t_y: self.y}
 
@@ -198,7 +197,7 @@ class FunctionWorld(World):
     def __init__(self, name, **kwargs):
         # experiment to learn sgd
         super(FunctionWorld, self).__init__(name, **kwargs)
-        self.stop_thres = 1e-2
+        self.stop_thres = 1e-1
         #self.Func = SimpleFunction()
         with tf.variable_scope('World'):
             if 'func' not in kwargs or kwargs['func'] == 'symplenn':
