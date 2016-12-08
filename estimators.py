@@ -44,12 +44,13 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
   input_shape = tf.shape(inputs)
   batch_size = input_shape[0]
   num_variables = input_shape[2]
+  gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
   if scope == None: scope = 'rnn'
   with tf.variable_scope(scope, reuse=reuse):
     state = tf.zeros([batch_size, num_variables])
     outputs = []
     for idx in range(num_features):
-      state, output = ConvGRUCell(inputs[:,idx,:,0], state, scope=scope, trainable=trainable, num_outputs=num_out)
+      state, output = gru(inputs[:,idx,:,0], state, scope=scope)
       outputs.append(output)
 
     outputs = tf.pack(outputs)
