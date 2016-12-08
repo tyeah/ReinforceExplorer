@@ -45,13 +45,13 @@ def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
   batch_size = input_shape[0]
   num_variables = input_shape[2]
   if scope == None: scope = 'rnn'
-  with tf.variable_scope(scope, reuse=reuse):
+  with tf.variable_scope(scope, reuse=):
     gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
-    state = tf.zeros([batch_size, num_variables, num_out])
-    for idx in range(num_features):
-      state, output = gru(inputs[:,idx,:,0], state, scope=scope)
+    inputs = tf.rehsape(inputs, [num_features, batch_size, num_variables, -1])
+    inputs = tf.unpack(inputs)
+    outputs, states = tf.nn.rnn[gru, inputs, dtype = tf.float32)
 
-    output = tf.reshape(output, [batch_size, num_variables, num_out])
+    output = tf.reshape(output[-1], [batch_size, num_variables, num_out])
 
   return output
 
