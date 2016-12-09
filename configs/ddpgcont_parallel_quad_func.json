@@ -4,7 +4,8 @@
             "func": "quad",
             "action": "step",
             "state": "gradient",
-            "stop_grad": 1e1
+            "stop_grad": 1e1,
+            "base_lr": 0.001
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,

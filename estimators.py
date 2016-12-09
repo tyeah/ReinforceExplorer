@@ -29,7 +29,6 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
                     biases_initializer=None, # zero bias
                     trainable=self.trainable):
                 #print inputs.get_shape(), len(state), state[0].get_shape(), self.out_shape, '!!!'
-                #print inputs.get_shape(), state.get_shape(), self.out_shape, '!!!'
                 state_ = tf.reshape(state, (-1,) + tuple(self.out_shape))
                 z = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
                 r = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
@@ -44,25 +43,20 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
 def rnn_preprocess(inputs, num_rnn_features, trainable, reuse, scope=None, **kwargs):
 
     num_features = kwargs['num_features']
-    print inputs.get_shape()
     input_shape = tf.shape(inputs)
     batch_size = input_shape[0]
     #num_variables = input_shape[2]
     input_shape1, num_variables = inputs.get_shape().as_list()[1], inputs.get_shape().as_list()[-1] / num_features
     inputs = tf.reshape(inputs, (batch_size, input_shape1, num_features, num_variables))
-    print '!', inputs.get_shape()
     inputs = tf.transpose(inputs, perm=[2, 0, 3, 1])
     inputs = tf.expand_dims(inputs, 4)
     #inputs = tf.reshape(inputs, (num_features, batch_size, num_variables * input_shape1))
-    print '!!', inputs.get_shape()
     inputs = tf.unpack(inputs)
-    print '!!', inputs[0].get_shape()
     if scope == None: scope = 'rnn'
     with tf.variable_scope(scope + '/rnn', reuse=reuse):
         gru = ConvGRUCell([num_variables, num_rnn_features, 1], trainable=trainable)
         #inputs = tf.reshape(inputs, [num_features, batch_size, num_variables, -1])
         inputs = tf.unpack(inputs)
-        print len(inputs), inputs[0].get_shape()
         outputs, states = tf.nn.rnn(gru, inputs, dtype = tf.float32)
     
         output = tf.reshape(outputs[-1], [batch_size, num_rnn_features, num_variables])

@@ -53,6 +53,7 @@ try:
         acc_rewards = 0
         for t in xrange(MAX_STEPS):
             if render: env.render()
+            #action = agent.action()
             action = agent.action() * 0.001
             #print action.shape, type(action)
             #print state

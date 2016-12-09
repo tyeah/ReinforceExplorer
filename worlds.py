@@ -87,6 +87,11 @@ class Function(object):
             self.dims[i]), v)  
             for i, v in enumerate(self.variables)]
 
+    def dist_lr(self, grads_flatten):
+        return [(tf.reshape(grads_flatten[self.dims_bins[i]: self.dims_bins[i+1]], 
+            self.dims[i]) * self.grads[i], v)  
+            for i, v in enumerate(self.variables)]
+
 
     def build_train(self):
         self.grads = tf.gradients(self.loss, self.variables)
@@ -97,7 +102,7 @@ class Function(object):
         self.dims_bins = np.cumsum([0] + [np.prod(d) for d in self.dims])
         if self.kwargs['action'] == 'learning_rate':
             self.num_actions = self.num_vars
-        elif self.kwargs['action'] == 'step':
+        elif self.kwargs['action'] in ['step', 'coordinate_lr'] :
             self.num_actions = sum([np.prod(d) for d in self.dims])
         self.action_low, self.action_high  = np.array([0] * self.num_vars), np.array([1] * self.num_vars)
 
@@ -107,7 +112,9 @@ class Function(object):
         self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_actions, name='train')
         if self.kwargs['action'] == 'learning_rate':
             self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
-        if self.kwargs['action'] == 'step':
+        elif self.kwargs['action'] == 'step':
+            self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
+        elif self.kwargs['action'] == 'coordinate_lr':
             self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
 
     def build_state(self):

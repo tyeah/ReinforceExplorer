@@ -645,7 +645,6 @@ class DDPGContAgent(DDPGAgent):
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
                     tf.float32)), self.config["min_lr"])
 
-        print self.t_state[0].get_shape().as_list()
         self.actor = Estimator(self.config['estimator_params']
                 ['policy_network']['name']).get_estimator(
                 inputs=self.t_state, num_out=np.prod(self.action_dim), 
@@ -714,7 +713,6 @@ class DDPGContAgent(DDPGAgent):
                 tau * v + (1.0 - tau) * critic_target_variables[k]))
 
         self.actor_loss = tf.reduce_mean(self.critic_target)
-        print self.t_reward.get_shape(), self.critic_target.get_shape(), self.critic.get_shape()
         self.target = tf.reshape(self.t_reward, \
                 [-1] + [1] * (self.critic.get_shape().ndims - 1))\
                 + self.config["discount_rate"] * self.critic_target

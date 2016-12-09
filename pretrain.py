@@ -4,26 +4,29 @@ from estimators import Estimator
 import json
 
 def main():
-    config_file = "configs/ddpgcont_parallel_func.json"
-    #max_iter = 10000
-    max_iter = 100
+    config_file = "configs/ddpgcont_parallel_quad_func.json"
+    max_iter = 1000
+    #max_iter = 100
     bsize, num_vars = 40, 200
     max_x = 10
-    save_file = 'weights/' + config_file.split('/')[-1].split('.')[0] + '/pretrain.ckpt'
 
 
     config = json.load(open(config_file))
+    save_file = 'weights/' + config_file.split('/')[-1].split('.')[0] + '/pretrain_%s.ckpt' % config['env_config']['action']
 
     actor_config = config['estimator_params']['policy_network']
     inputs = tf.placeholder(dtype=tf.float32, shape=(bsize, 
         actor_config['num_features'], num_vars, 1))
     actor = Estimator(config['estimator_params']
             ['policy_network']['name']).get_estimator(
-            inputs=[inputs],
+            inputs=[tf.reshape(inputs, (bsize, 1, actor_config['num_features'] * num_vars))],
             scope='actor',
             **actor_config)
-    loss = tf.reduce_sum(tf.square(tf.squeeze(actor) - inputs[:, -1, :, 0]))
-    train_op = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9).minimize(loss)
+    if config['env_config']['action'] == 'step':
+        loss = tf.reduce_sum(tf.square(tf.squeeze(actor) - inputs[:, -1, :, 0]))
+    elif config['env_config']['action'] == 'coordinate_lr':
+        loss = tf.reduce_sum(tf.square(tf.squeeze(actor) - config['env_config']['base_lr']))
+    train_op = tf.train.RMSPropOptimizer(learning_rate=0.0001, decay=0.9).minimize(loss)
 
     sess = tf.Session()
     loader = tf.train.Saver()
@@ -50,6 +53,7 @@ def main():
 
     saver = tf.train.Saver()
     saver.save(sess, save_file)
+    print "save to " + save_file
 
 
 if __name__ == "__main__":
