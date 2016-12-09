@@ -28,10 +28,10 @@ json.dump(config, open(args.save_dir + '/config.json', 'w'), indent=4)
 config['weights'] = args.weights
 config['save_dir'] = args.save_dir
 
-if 'env_config' in config:
-    env = init_world(config['env'], **config['env_config'])
-else:
-    env = init_world(config['env'])
+if 'env_config' not in config:
+    config['env_config'] = {}
+env = init_world(config['env'], **config['env_config'])
+
 MAX_EPISODES = config['MAX_EPISODES']
 MAX_STEPS    = config['MAX_STEPS']
 
@@ -53,9 +53,12 @@ try:
         acc_rewards = 0
         for t in xrange(MAX_STEPS):
             if render: env.render()
-            action = agent.action()
+            action = agent.action() * 0.001
             #print action.shape, type(action)
+            #print state
             #print type(state), state.shape
+            #print action
+            #print state
             #sys.exit()
             #action = 0.001 * state.reshape(-1)
             next_state, reward, done, _ = env.step(action)
@@ -74,11 +77,12 @@ try:
                 agent.reset_model()
                 no_reward_since = 0
                 avg_rewards = deque(maxlen=100)
+                env = init_world(config['env'], **config['env_config'])
                 continue
         else:
             no_reward_since = 0
         avg_rewards.append(acc_rewards)
-        print("episode %d, episode reward: %f, mean reward: %f, num steps: %d, final value: %f" % (i_eps, acc_rewards, np.mean(avg_rewards), t, env.last_value))
+        print("episode %d, episode reward: %f, mean reward: %f, num steps: %d, final value: %f" % (i_eps, acc_rewards, np.mean(avg_rewards), t + 1, env.last_value))
         log_file.write('%f\n' % np.mean(avg_rewards))
 except KeyboardInterrupt:
     print('KeyboardInterrupt')

@@ -144,11 +144,14 @@ class QuadraticFunction(Function):
         num_vars = 10
         A0 = np.random.randn(num_vars, num_vars).astype('float32')
         A = A0.T.dot(A0)
+        A += np.eye(num_vars) * 0.1
         b = np.random.randn(num_vars).astype('float32')
+        #A = np.eye(num_vars).astype('float32')
+        #b = np.ones(num_vars).astype('float32')
         with tf.variable_scope('Variables'):
             self.x = tf.get_variable('x', 
                     (num_vars,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
-        self.loss = tf.squeeze(tf.matmul(tf.reshape(self.x, (1, -1)), 
+        self.loss = 0.5 * tf.squeeze(tf.matmul(tf.reshape(self.x, (1, -1)), 
             tf.matmul(A, tf.reshape(self.x, (-1, 1))))) + tf.reduce_sum(b * self.x)
         self.variables = tf.get_collection(tf.GraphKeys.VARIABLES, scope="World")
         self.build_train()
@@ -197,12 +200,14 @@ class FunctionWorld(World):
     def __init__(self, name, **kwargs):
         # experiment to learn sgd
         super(FunctionWorld, self).__init__(name, **kwargs)
-        self.stop_thres = 1e-1
+        self.base_stop_thres = kwargs['stop_grad'] #simplenn
+        self.stop_thres = self.base_stop_thres
+        #self.stop_thres = 1e0 #quad
         #self.Func = SimpleFunction()
         with tf.variable_scope('World'):
-            if 'func' not in kwargs or kwargs['func'] == 'symplenn':
+            if 'func' not in kwargs or kwargs['func'] == 'simplenn':
                 self.Func = SimpleNNFunction(**kwargs)
-            if 'func' not in kwargs or kwargs['func'] == 'quad':
+            elif 'func' not in kwargs or kwargs['func'] == 'quad':
                 self.Func = QuadraticFunction(**kwargs)
         self.variables = self.Func.variables
         self.loss = self.Func.loss
@@ -219,10 +224,15 @@ class FunctionWorld(World):
         self.observation_space = ContSpace(self.state.get_shape().as_list())
         self.observation_dims = self.observation_space.shape
 
+        self.episode_counter = 0
+
         
         self.sess = tf.Session()
 
     def reset(self):
+        self.episode_counter += 1
+        if self.stop_thres > self.base_stop_thres * 0.1:
+            self.stop_thres *= 0.9999
         self.step_counter = 0
         self.sess.run(tf.initialize_all_variables())
         feed = self.Func.gen_feed()
@@ -255,11 +265,13 @@ class FunctionWorld(World):
         if grad_scale < self.stop_thres:
             done = True
             reward = inc + self.init_value - value
-        elif value - self.init_value > 200:
-            #done = True
-            #reward = - 1000
-            done = False
-            reward = inc
+            #reward = inc
+            print value, reward, grad_scale, self.stop_thres
+        elif value - self.init_value > 500:
+            done = True
+            reward = - 1000
+            #done = False
+            #reward = inc
         else:
             done = False
             reward = inc

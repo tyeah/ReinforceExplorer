@@ -116,6 +116,7 @@ class PGAgent(Agent):
             self.cond = lambda: len(self.rollouts['rewards']) >= self.config["store_size"]
         self.reset_buffer()
         self.sess = tf.Session()
+        #with tf.variable_scope('Agent'):
         self.build_model()
         self.saver = tf.train.Saver()
         self.init_weights()
@@ -124,7 +125,27 @@ class PGAgent(Agent):
         '''
     def init_weights(self):
         if self.config["weights"] is not None:
-            self.saver.restore(self.sess, self.config["weights"])
+            try:
+                self.saver.restore(self.sess, self.config["weights"])
+                print "loaded weights:", self.config['weights']
+            except tf.python.errors.NotFoundError:
+                ckpt_reader = tf.train.NewCheckpointReader(self.config['weights'])
+                var_list_restore = {v.name.split(':')[0]: v for
+                        v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if 
+                        ckpt_reader.has_tensor(v.name.split(':')[0]) 
+                        and not v.name.startswith('World')}
+                var_list_init = [v for v in tf.get_collection(tf.GraphKeys.VARIABLES)
+                        if not ckpt_reader.has_tensor(v.name.split(':')[0]) 
+                        and not v.name.startswith('World')]
+                if len(var_list_restore) > 0:
+                    loader = tf.train.Saver(var_list_restore)
+                    loader.restore(self.sess, self.config['weights'])
+                print "loaded part of weights:", self.config['weights']
+                print var_list_restore.keys()
+                if len(var_list_init) > 0:
+                    init = tf.initialize_variables(var_list_init)
+                    self.sess.run(init)
+
         else:
             self.sess.run(tf.initialize_all_variables())
 
@@ -624,12 +645,14 @@ class DDPGContAgent(DDPGAgent):
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
                     tf.float32)), self.config["min_lr"])
 
+        print self.t_state[0].get_shape().as_list()
         self.actor = Estimator(self.config['estimator_params']
                 ['policy_network']['name']).get_estimator(
                 inputs=self.t_state, num_out=np.prod(self.action_dim), 
                 scope='actor', 
                 **self.config['estimator_params']['policy_network'])
         #print self.actor.get_shape(), (-1,) + self.action_dim
+        self.actor_id = tf.identity(self.actor)
         self.actor = tf.reshape(self.actor, (-1,) + self.action_dim)
         #TODO:
         #self.action_scale = 1e-3
@@ -714,6 +737,7 @@ class DDPGContAgent(DDPGAgent):
         sys.exit(0)
         '''
         _, loss, global_step = self.sess.run([self.train_op, self.loss, self.global_step], feed_dict=feed)
+        #print actor.shape
         self.update_target()
         if global_step % self.config["save_step"] == 0 and global_step > 0:
             filename = self.save_file# + '-%d' % global_step

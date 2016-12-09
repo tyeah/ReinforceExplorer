@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.contrib import slim
+import numpy as np
 
 
 class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
@@ -11,10 +12,10 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
 
     @property
     def state_size(self):
-        return self.out_shape
+        return np.prod(self.out_shape)
     @property
     def output_size(self):
-        return self.out_shape
+        return np.prod(self.out_shape)
 
     def __call__(self, inputs, state, scope=None):
         with tf.variable_scope(scope or type(self).__name__, reuse=self.reuse):
@@ -27,6 +28,8 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
                     activation_fn=None,
                     biases_initializer=None, # zero bias
                     trainable=self.trainable):
+                #print inputs.get_shape(), len(state), state[0].get_shape(), self.out_shape, '!!!'
+                #print inputs.get_shape(), state.get_shape(), self.out_shape, '!!!'
                 state_ = tf.reshape(state, (-1,) + tuple(self.out_shape))
                 z = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
                 r = tf.nn.sigmoid(slim.conv2d(inputs) + slim.conv2d(state_))
@@ -38,22 +41,33 @@ class ConvGRUCell(tf.nn.rnn_cell.RNNCell):
                     self.reuse = True
                 return output, output
 
-def rnn_preprocess(inputs, num_out, trainable, reuse, scope=None, **kwargs):
+def rnn_preprocess(inputs, num_rnn_features, trainable, reuse, scope=None, **kwargs):
 
-  num_features = kwargs['num_features']
-  input_shape = tf.shape(inputs)
-  batch_size = input_shape[0]
-  num_variables = input_shape[2]
-  if scope == None: scope = 'rnn'
-  with tf.variable_scope(scope, reuse=resue):
-    gru = ConvGRUCell([num_variables, num_out], trainable=trainable)
-    inputs = tf.rehsape(inputs, [num_features, batch_size, num_variables, -1])
+    num_features = kwargs['num_features']
+    print inputs.get_shape()
+    input_shape = tf.shape(inputs)
+    batch_size = input_shape[0]
+    #num_variables = input_shape[2]
+    input_shape1, num_variables = inputs.get_shape().as_list()[1], inputs.get_shape().as_list()[-1] / num_features
+    inputs = tf.reshape(inputs, (batch_size, input_shape1, num_features, num_variables))
+    print '!', inputs.get_shape()
+    inputs = tf.transpose(inputs, perm=[2, 0, 3, 1])
+    inputs = tf.expand_dims(inputs, 4)
+    #inputs = tf.reshape(inputs, (num_features, batch_size, num_variables * input_shape1))
+    print '!!', inputs.get_shape()
     inputs = tf.unpack(inputs)
-    outputs, states = tf.nn.rnn(gru, inputs, dtype = tf.float32)
-
-    output = tf.reshape(outputs[-1], [batch_size, num_variables, num_out])
-
-  return output
+    print '!!', inputs[0].get_shape()
+    if scope == None: scope = 'rnn'
+    with tf.variable_scope(scope + '/rnn', reuse=reuse):
+        gru = ConvGRUCell([num_variables, num_rnn_features, 1], trainable=trainable)
+        #inputs = tf.reshape(inputs, [num_features, batch_size, num_variables, -1])
+        inputs = tf.unpack(inputs)
+        print len(inputs), inputs[0].get_shape()
+        outputs, states = tf.nn.rnn(gru, inputs, dtype = tf.float32)
+    
+        output = tf.reshape(outputs[-1], [batch_size, num_rnn_features, num_variables])
+  
+    return output
 
 # function approximators: v(s) or pi(s)
 class Estimator(object):
@@ -72,11 +86,11 @@ class Estimator(object):
         if not self.reuse:
             self.reuse = False
         if len(inputs) == 1:
-            ret = self.est_fn(inputs[0], reuse=self.reuse, **kwargs)
-        else:
-            if kwargs['rnn_preprocess']:
-              inputs = rnn_preprocess(inputs, kwargs['num_out'], True, reuse, scope='rnn', **kwargs)
-            ret = self.est_fn(inputs, reuse=self.reuse, **kwargs)
+            if 'rnn_preprocess' in kwargs and kwargs['rnn_preprocess']:
+              inputs = rnn_preprocess(inputs[0], reuse=self.reuse, **kwargs)
+              ret = self.est_fn(inputs, reuse=self.reuse, **kwargs)
+            else:
+              ret = self.est_fn(inputs[0], reuse=self.reuse, **kwargs)
         self.reuse = True
         return ret
 
@@ -138,7 +152,10 @@ def fc_action(inputs, actions, num_out, num_hids, reuse, trainable, scope=None, 
 
 def parallel(inputs, reuse, trainable, scope=None, **kwargs):
     net = inputs
-    num_features = kwargs['num_features']
+    if 'rnn_preprocess' in kwargs and kwargs['rnn_preprocess']:
+        num_features = kwargs['num_rnn_features']
+    else:
+        num_features = kwargs['num_features']
     net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
     if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):
@@ -154,7 +171,10 @@ def parallel(inputs, reuse, trainable, scope=None, **kwargs):
 
 def parallel_action(inputs, actions, reuse, trainable, scope=None, **kwargs):
     net = inputs
-    num_features = kwargs['num_features']
+    if 'rnn_preprocess' in kwargs and kwargs['rnn_preprocess']:
+        num_features = kwargs['num_rnn_features']
+    else:
+        num_features = kwargs['num_features']
     net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
     if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):

@@ -1,10 +1,10 @@
 {
         "env": "function",
         "env_config" : {
-            "func": "simplenn",
+            "func": "quad",
             "action": "step",
             "state": "gradient",
-            "stop_grad": 1e-1
+            "stop_grad": 1e1
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,

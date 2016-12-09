@@ -32,14 +32,14 @@
         "estimator_params": {
             "policy_network": {
                 "name": "parallel", 
-                "rnn_preprocess": false,
+                "rnn_preprocess": true,
                 "num_hids": [20, 20],
                 "num_features": 10,
                 "trainable": true
              },
             "value_network": {
                 "name": "parallel_action", 
-                "rnn_preprocess": false,
+                "rnn_preprocess": true,
                 "num_hids": [20, 20],
                 "num_features": 10,
                 "trainable": true
