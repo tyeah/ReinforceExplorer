@@ -2,9 +2,10 @@
         "env": "function",
         "env_config" : {
             "func": "quad",
-            "action": "step",
-            "state": "variable_gradient",
-            "stop_grad": 5e1,
+            "action": "params",
+            "opt_method": "sgd",
+            "state": "loss",
+            "stop_grad": 5e0,
             "base_lr": 0.001
         },
         "agent": "ddpg_cont",
@@ -32,14 +33,14 @@
         "log_step": 20,
         "estimator_params": {
             "policy_network": {
-                "name": "parallel", 
+                "name": "fc", 
                 "rnn_preprocess": false,
                 "num_hids": [20, 20],
                 "num_features": 10,
                 "trainable": true
              },
             "value_network": {
-                "name": "parallel_action", 
+                "name": "fc_action", 
                 "rnn_preprocess": false,
                 "num_hids": [20, 20],
                 "num_features": 10,

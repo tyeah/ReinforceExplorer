@@ -77,11 +77,6 @@ class Function(object):
     def gen_feed(self):
         pass
 
-    def build_state(self):
-        self.state = tf.concat(0, 
-                [tf.expand_dims(tf.concat(0, self.variables), 0), 
-                tf.expand_dims(tf.concat(0, self.grads), 0)])
-
     def dist_grads(self, grads_flatten):
         return [(tf.reshape(grads_flatten[self.dims_bins[i]: self.dims_bins[i+1]], 
             self.dims[i]), v)  
@@ -91,7 +86,6 @@ class Function(object):
         return [(tf.reshape(grads_flatten[self.dims_bins[i]: self.dims_bins[i+1]], 
             self.dims[i]) * self.grads[i], v)  
             for i, v in enumerate(self.variables)]
-
 
     def build_train(self):
         self.grads = tf.gradients(self.loss, self.variables)
@@ -104,18 +98,33 @@ class Function(object):
             self.num_actions = self.num_vars
         elif self.kwargs['action'] in ['step', 'coordinate_lr'] :
             self.num_actions = sum([np.prod(d) for d in self.dims])
+        elif self.kwargs['action'] == 'params':
+            if self.kwargs['opt_method'] == 'rmsprop':
+                self.num_actions = 4
+            elif self.kwargs['opt_method'] == 'sgd':
+                self.num_actions = 1
         self.action_low, self.action_high  = np.array([0] * self.num_vars), np.array([1] * self.num_vars)
 
-        #optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
-        #        decay=0.9)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
         self.t_action = tf.placeholder(dtype=tf.float32, shape=self.num_actions, name='train')
+        if self.kwargs['action'] != 'params':
+            #optimizer = tf.train.RMSPropOptimizer(learning_rate=1.0,
+            #        decay=0.9)
+            optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
+        else:
+            if self.kwargs['opt_method'] == 'rmsprop':
+                optimizer = tf.train.RMSPropOptimizer(learning_rate=self.t_action[0],
+                        decay=self.t_action[1], momentum=self.t_action[2],
+                        epsilon=self.t_action[3])
+            elif self.kwargs['opt_method'] == 'sgd':
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.t_action[0])
         if self.kwargs['action'] == 'learning_rate':
             self.train_op = optimizer.apply_gradients([(self.t_action[i] * g, v) for i, (v, g) in enumerate(zip(self.variables, self.grads))])
         elif self.kwargs['action'] == 'step':
             self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
         elif self.kwargs['action'] == 'coordinate_lr':
             self.train_op = optimizer.apply_gradients(self.dist_grads(self.t_action))
+        elif self.kwargs['action'] == 'params':
+            self.train_op = optimizer.apply_gradients([(g, v) for (v, g) in zip(self.variables, self.grads)])
 
     def build_state(self):
         variables = []
@@ -123,13 +132,14 @@ class Function(object):
         for v, g in zip(self.variables, self.grads):
             variables.append(tf.reshape(v, (-1,)))
             grads.append(tf.reshape(g, (-1,)))
-        if "state" in self.kwargs and self.kwargs['state'] == 'gradient':
+        if self.kwargs['state'] == 'gradient':
             self.state = tf.expand_dims(tf.concat(0, grads), 0)
-            #self.state = [tf.expand_dims(g, 0) for g in grads]
-        else:
+        elif self.kwargs['state'] == 'variable_gradient':
             self.state = tf.concat(0, 
                     [tf.expand_dims(tf.concat(0, variables), 0), 
                     tf.expand_dims(tf.concat(0, grads), 0)])
+        elif self.kwargs['state'] == 'loss':
+            self.state = tf.reshape(self.loss, (1,))
 
 class SimpleFunction(Function):
     def __init__(self, **kwargs):
@@ -148,7 +158,7 @@ class SimpleFunction(Function):
 class QuadraticFunction(Function):
     def __init__(self, **kwargs):
         super(QuadraticFunction, self).__init__(**kwargs)
-        num_vars = 10
+        num_vars = 20
         A0 = np.random.randn(num_vars, num_vars).astype('float32')
         A = A0.T.dot(A0)
         A += np.eye(num_vars) * 0.1
@@ -238,8 +248,8 @@ class FunctionWorld(World):
 
     def reset(self):
         self.episode_counter += 1
-        if self.stop_thres > self.base_stop_thres * 0.1:
-            self.stop_thres *= 0.9999
+        if self.stop_thres > self.base_stop_thres * 0.01:
+            self.stop_thres *= 0.999
         self.step_counter = 0
         self.sess.run(tf.initialize_all_variables())
         feed = self.Func.gen_feed()
@@ -249,12 +259,12 @@ class FunctionWorld(World):
         return state
 
     def eps_end(self):
-        if self.kwargs['state'] == 'gradient':
+        if self.kwargs['state'] in ['gradient', 'state', 'variable_gradient']:
             def ee(done, reward, state=None):
-                return np.sum(state[0] ** 2) < self.stop_thres
-        if self.kwargs['state'] == 'variable_gradient':
+                return np.sum(state[-1] ** 2) < self.stop_thres
+        else:
             def ee(done, reward, state=None):
-                return np.sum(state[1] ** 2) < self.stop_thres
+                return done
         return ee
 
     def step(self, action):

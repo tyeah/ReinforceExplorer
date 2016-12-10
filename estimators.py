@@ -150,7 +150,10 @@ def parallel(inputs, reuse, trainable, scope=None, **kwargs):
         num_features = kwargs['num_rnn_features']
     else:
         num_features = kwargs['num_features']
-    net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
+    dims = net.get_shape().as_list()
+    dim_features = dims[1]
+    net = tf.reshape(net, (tf.shape(net)[0], num_features, dims[2] / num_features, dim_features))
+    # batch_size, num_features, num_variables, dim_features
     if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
@@ -169,7 +172,9 @@ def parallel_action(inputs, actions, reuse, trainable, scope=None, **kwargs):
         num_features = kwargs['num_rnn_features']
     else:
         num_features = kwargs['num_features']
-    net = tf.reshape(net, (tf.shape(net)[0], num_features, -1, 1))
+    dims = net.get_shape().as_list()
+    dim_features = dims[1]
+    net = tf.reshape(net, (tf.shape(net)[0], num_features, dims[2] / num_features, dim_features))
     if scope == None: scope = 'parallel'
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
