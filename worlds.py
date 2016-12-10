@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 import gym
 from estimators import Estimator
+from tensorflow.examples.tutorials.mnist import input_data
+from tensorflow.contrib import slim
 
 def init_world(name, **kwargs):
     worlds = {
@@ -213,6 +215,33 @@ class SimpleNNFunction(Function):
         X += np.random.randn(size, Xdim)
         return X, y, ydim
 
+class MNISTFunction(Function):
+    def __init__(self, **kwargs):
+        super(MNISTFunction, self).__init__(**kwargs)
+        self.batch_size = kwargs['batch_size']
+
+        self.mnist = input_data.read_data_sets("MNIST_data/", one_hot=False)
+        self.gen_train = self.mnist.train
+        X, y = self.gen_train.next_batch(1)
+        self.x_dim = X.shape[1]
+
+        self.t_X = tf.placeholder(dtype=tf.float32, shape=(None, self.x_dim), name='MNIST_X')
+        self.t_y = tf.placeholder(dtype=tf.int32, shape=(None,), name='MNIST_y')
+        self.logits = Estimator('fc').get_estimator(
+                inputs=[self.t_X], num_out=10, 
+                num_hids=[500, 300],
+                trainable=True,
+                scope='mnist_lenet')
+        self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                self.logits , self.t_y))
+        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='World')
+        self.build_train()
+        self.build_state()
+
+    def gen_feed(self):
+        X, y = self.gen_train.next_batch(self.batch_size)
+        return {self.t_X: X, self.t_y: y}
+
 class FunctionWorld(World):
     def __init__(self, name, **kwargs):
         # experiment to learn sgd
@@ -226,6 +255,8 @@ class FunctionWorld(World):
                 self.Func = SimpleNNFunction(**kwargs)
             elif 'func' not in kwargs or kwargs['func'] == 'quad':
                 self.Func = QuadraticFunction(**kwargs)
+            elif 'func' not in kwargs or kwargs['func'] == 'mnist':
+                self.Func = MNISTFunction(**kwargs)
         self.variables = self.Func.variables
         self.loss = self.Func.loss
         self.train_op = self.Func.train_op
@@ -251,6 +282,7 @@ class FunctionWorld(World):
         if self.stop_thres > self.base_stop_thres * 0.01:
             self.stop_thres *= 0.999
         self.step_counter = 0
+        #tf.reset_default_graph() #??????????????????????
         self.sess.run(tf.initialize_all_variables())
         feed = self.Func.gen_feed()
         state, value = self.sess.run([self.state, self.loss], feed_dict=feed)
@@ -279,20 +311,35 @@ class FunctionWorld(World):
         inc = (self.last_value - value)
         self.last_value = value
         #print "grad_scale: %f, value: %f" % (grad_scale, value)
-        if grad_scale < self.stop_thres:
-            done = True
-            reward = inc + self.init_value - value
-            #reward = inc
-            print value, reward, grad_scale, self.stop_thres
-        elif value - self.init_value > 500:
-            done = True
-            reward = - 1000
-            #done = False
-            #reward = inc
+        info = True
+        if self.kwargs['func'] != 'mnist':
+            if grad_scale < self.stop_thres:
+                done = True
+                reward = inc + self.init_value - value
+                #reward = inc
+                print value, reward, grad_scale, self.stop_thres
+            elif value - self.init_value > 500:
+                done = True
+                reward = - 1000
+                #done = False
+                #reward = inc
+                info = False # abnormal exit
+            else:
+                done = False
+                reward = inc
         else:
-            done = False
-            reward = inc
-        #print value, reward, grad_scale
+            if self.step_counter >= self.kwargs['max_iter']:
+                done = True
+                reward = inc
+            elif value - self.init_value > 50:
+                done = True
+                reward = - 1000
+                info = False # abnormal exit
+            else:
+                done = False
+                reward = inc
+            if self.step_counter % 100 == 0:
+                print value, reward, grad_scale, self.step_counter, action
         '''
         done = grad_scale < self.stop_thres
         #reward = inc / grad_scale if not done else inc / grad_scale - self.step_counter
@@ -301,4 +348,4 @@ class FunctionWorld(World):
         '''
         self.step_counter += 1
         #reward = -1 #TODO
-        return state, reward, done, None
+        return state, reward, done, info

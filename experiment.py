@@ -43,6 +43,7 @@ agent = init_agent(config['agent'])(observation_dims=(env.observation_dims,),
 avg_rewards = deque(maxlen=100)
 no_reward_since = 0
 log_file = open('log.txt', 'w')
+action_multiplier = np.array(config['env_config']['action_multiplier'])
 try:
     for i_eps in xrange(MAX_EPISODES):
         total_rewards = 0
@@ -54,7 +55,9 @@ try:
         for t in xrange(MAX_STEPS):
             if render: env.render()
             #action = agent.action()
-            action = agent.action() * 0.001
+            #action = agent.action() * 0.001
+            action = agent.action() * action_multiplier
+            #print action
             #print action.shape, type(action)
             #print state
             #print type(state), state.shape
@@ -62,7 +65,8 @@ try:
             #print state
             #sys.exit()
             #action = 0.001 * state.reshape(-1)
-            next_state, reward, done, _ = env.step(action)
+            #action = [0.01]
+            next_state, reward, done, info = env.step(action)
             #print env.last_value
             #print reward, done, action
             acc_rewards += reward
@@ -72,13 +76,13 @@ try:
             if done: break
 
         final_value = env.last_value
-        if not done and final_value > 100:
+        if not info or (not done and final_value > 50):
             no_reward_since += 1
             if no_reward_since >= EPISODES_BEFORE_RESET:
                 agent.reset_model()
                 no_reward_since = 0
                 avg_rewards = deque(maxlen=100)
-                env = init_world(config['env'], **config['env_config'])
+                #env = init_world(config['env'], **config['env_config'])
                 continue
         else:
             no_reward_since = 0
