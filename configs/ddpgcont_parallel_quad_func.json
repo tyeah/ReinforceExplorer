@@ -3,9 +3,11 @@
         "env_config" : {
             "func": "quad",
             "action": "step",
-            "state": "variable_gradient",
-            "stop_grad": 5e1,
-            "base_lr": 0.001
+            "state": "gradient",
+            "action_multiplier": 0.01,
+            "stop_grad": 1e-1,
+            "base_lr": 0.001,
+            "max_iter": 500
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,

@@ -3,20 +3,24 @@
         "env_config" : {
             "func": "quad",
             "action": "params",
+            "params_keep_iter": 10,
             "opt_method": "sgd",
+            "action_multiplier": [0.01],
             "state": "loss",
-            "stop_grad": 5e0,
-            "base_lr": 0.001
+            "stop_grad": 1e-3,
+            "base_lr": 0.001,
+            "batch_size": 100,
+            "max_iter": 2000
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,
-        "MAX_STEPS": 500,
+        "MAX_STEPS": 5000000,
         "EPISODES_BEFORE_RESET": 10,
         "discount_rate": 0.99,
         "tau": 0.01,
         "reg_param": 1e-3,
         "l2": 0.001,
-        "init_learning_rate": 1e-4,
+        "init_learning_rate": 5e-5,
         "init_exp_rate": 0.1,
         "anneal_step_exp": 200000,
         "anneal_step_lr": 200000,
@@ -29,26 +33,27 @@
         "store_size": 50,
         "memory_size": 64,
         "batch_size": 8,
-        "save_step": 500000,
+        "save_step": 1000,
         "log_step": 20,
+        "polycy_gradient_scale": 0.1,
         "estimator_params": {
             "policy_network": {
                 "name": "fc", 
                 "rnn_preprocess": false,
                 "num_hids": [20, 20],
-                "num_features": 10,
+                "num_features": 100,
                 "trainable": true
              },
             "value_network": {
                 "name": "fc_action", 
                 "rnn_preprocess": false,
                 "num_hids": [20, 20],
-                "num_features": 10,
+                "num_features": 100,
                 "trainable": true
              }
         },
         "inner_state_params": {
             "name": "multi_step_inner_state",
-            "num_steps": 10
+            "num_steps": 100
         }
 }

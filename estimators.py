@@ -185,5 +185,7 @@ def parallel_action(inputs, actions, reuse, trainable, scope=None, **kwargs):
                 net = slim.conv2d(net, nh, [num_features if nl == 0 else 1, 1], reuse=reuse, scope='conv%d' % (nl + 1))
             net = tf.concat(3, (net, tf.cast(tf.reshape(actions, (tf.shape(net)[0], 1, -1, 1)), net.dtype)))
             net = slim.conv2d(net, 1, [1, 1], reuse=reuse, activation_fn=None, scope='fc')
-            net = tf.reshape(net, (tf.shape(net)[0], 1, -1))
+            #print net.get_shape().as_list(), '-' * 30
+            #net = tf.reshape(net, (tf.shape(net)[0], 1, -1))
+            net = tf.reduce_mean(net, reduction_indices=[1, 2, 3])
             return net

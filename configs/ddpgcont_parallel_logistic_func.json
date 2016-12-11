@@ -1,11 +1,12 @@
 {
         "env": "function",
         "env_config" : {
-            "func": "simplenn",
+            "func": "logistic",
             "action": "step",
             "state": "gradient",
-            "stop_grad": 1e-1,
-            "action_multiplier": 0.001
+            "action_multiplier": 0.001,
+            "stop_grad": 1e-3,
+            "max_iter": 500
         },
         "agent": "ddpg_cont",
         "MAX_EPISODES": 1000000,
@@ -30,6 +31,7 @@
         "batch_size": 8,
         "save_step": 500000,
         "log_step": 20,
+        "polycy_gradient_scale": 0.05,
         "estimator_params": {
             "policy_network": {
                 "name": "parallel", 

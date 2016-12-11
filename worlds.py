@@ -4,6 +4,7 @@ import gym
 from estimators import Estimator
 from tensorflow.examples.tutorials.mnist import input_data
 from tensorflow.contrib import slim
+from matplotlib import pyplot as plt
 
 def init_world(name, **kwargs):
     worlds = {
@@ -79,6 +80,9 @@ class Function(object):
     def gen_feed(self):
         pass
 
+    def init_data(self):
+        pass
+
     def dist_grads(self, grads_flatten):
         return [(tf.reshape(grads_flatten[self.dims_bins[i]: self.dims_bins[i+1]], 
             self.dims[i]), v)  
@@ -143,6 +147,12 @@ class Function(object):
         elif self.kwargs['state'] == 'loss':
             self.state = tf.reshape(self.loss, (1,))
 
+    def step(self, sess, action):
+        feed = self.gen_feed()
+        feed.update({self.t_action: action})
+        state, value, grad_scale, _ = sess.run([self.state, self.loss, self.grad_scale, self.train_op], feed_dict=feed)
+        return state, value, grad_scale
+
 class SimpleFunction(Function):
     def __init__(self, **kwargs):
         super(SimpleFunction, self).__init__(**kwargs)
@@ -160,21 +170,24 @@ class SimpleFunction(Function):
 class QuadraticFunction(Function):
     def __init__(self, **kwargs):
         super(QuadraticFunction, self).__init__(**kwargs)
-        num_vars = 20
-        A0 = np.random.randn(num_vars, num_vars).astype('float32')
-        A = A0.T.dot(A0)
-        A += np.eye(num_vars) * 0.1
-        b = np.random.randn(num_vars).astype('float32')
-        #A = np.eye(num_vars).astype('float32')
-        #b = np.ones(num_vars).astype('float32')
+        self.num_vars = 20
+        self.init_data()
         with tf.variable_scope('Variables'):
             self.x = tf.get_variable('x', 
-                    (num_vars,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
+                    (self.num_vars,), tf.float32, tf.random_normal_initializer(mean=1., stddev=1))
         self.loss = 0.5 * tf.squeeze(tf.matmul(tf.reshape(self.x, (1, -1)), 
-            tf.matmul(A, tf.reshape(self.x, (-1, 1))))) + tf.reduce_sum(b * self.x)
+            tf.matmul(self.A, tf.reshape(self.x, (-1, 1))))) + tf.reduce_sum(self.b * self.x)
         self.variables = tf.get_collection(tf.GraphKeys.VARIABLES, scope="World")
         self.build_train()
         self.build_state()
+
+    def init_data(self):
+        A0 = np.random.randn(self.num_vars, self.num_vars).astype('float32')
+        self.A = A0.T.dot(A0)
+        self.A += np.eye(self.num_vars) * 0.1
+        self.b = np.random.randn(self.num_vars).astype('float32')
+        self.A = np.eye(self.num_vars).astype('float32')
+        self.b = np.ones(self.num_vars).astype('float32')
 
     def gen_feed(self):
         return {}
@@ -182,7 +195,7 @@ class QuadraticFunction(Function):
 class SimpleNNFunction(Function):
     def __init__(self, **kwargs):
         super(SimpleNNFunction, self).__init__(**kwargs)
-        self.X, self.y, ydim = self.gen_data()
+        self.init_data()
         self.t_X = tf.placeholder(dtype=tf.float32, shape=(None, self.X.shape[1]), name='X')
         self.t_y = tf.placeholder(dtype=tf.int32, shape=(None,), name='y')
         estimator_params = {
@@ -191,7 +204,7 @@ class SimpleNNFunction(Function):
             "trainable": True
          }
         self.logits = Estimator(estimator_params['name']).get_estimator(
-                inputs=[self.t_X], num_out=ydim, 
+                inputs=[self.t_X], num_out=self.ydim, 
                 scope='estimator', 
                 **estimator_params)
         self.loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -199,6 +212,9 @@ class SimpleNNFunction(Function):
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='World')
         self.build_train()
         self.build_state()
+
+    def init_data(self):
+        self.X, self.y, self.ydim = self.gen_data()
 
     def gen_feed(self):
         return {self.t_X: self.X, self.t_y: self.y}
@@ -214,6 +230,38 @@ class SimpleNNFunction(Function):
             X[y == i] = X_base[i]
         X += np.random.randn(size, Xdim)
         return X, y, ydim
+
+class LogisticFunction(Function):
+    def __init__(self, **kwargs):
+        super(LogisticFunction, self).__init__(**kwargs)
+        self.init_data()
+        self.t_X = tf.placeholder(dtype=tf.float32, shape=(None, self.X.shape[1]), name='X')
+        self.t_y = tf.placeholder(dtype=tf.int32, shape=(None,), name='y')
+
+        self.logits = tf.reshape(slim.fully_connected(self.t_X, 1, activation_fn=None), (-1,))
+        self.loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                self.logits , tf.cast(self.t_y, dtype=tf.float32)))
+        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='World')
+        self.build_train()
+        self.build_state()
+
+    def init_data(self):
+        self.X, self.y = self.gen_data()
+
+    def gen_feed(self):
+        return {self.t_X: self.X, self.t_y: self.y}
+
+    def gen_data(self):
+        size = 400
+        ydim = 2
+        Xdim = 20
+        X_base = np.random.rand(ydim, Xdim) * 1.0
+        y = np.random.randint(0, ydim, size).astype('int32')
+        X = np.zeros((size, Xdim)).astype('float32')
+        for i in range(ydim):
+            X[y == i] = X_base[i]
+        X += np.random.randn(size, Xdim)
+        return X, y
 
 class MNISTFunction(Function):
     def __init__(self, **kwargs):
@@ -242,6 +290,17 @@ class MNISTFunction(Function):
         X, y = self.gen_train.next_batch(self.batch_size)
         return {self.t_X: X, self.t_y: y}
 
+    def step(self, sess, action):
+        if 'params_keep_iter' in self.kwargs:
+            for _ in xrange(self.kwargs['params_keep_iter']-1):
+                feed = self.gen_feed()
+                feed.update({self.t_action: action})
+                sess.run(self.train_op, feed_dict=feed)
+        feed = self.gen_feed()
+        feed.update({self.t_action: action})
+        state, value, grad_scale, _ = sess.run([self.state, self.loss, self.grad_scale, self.train_op], feed_dict=feed)
+        return state, value, grad_scale
+
 class FunctionWorld(World):
     def __init__(self, name, **kwargs):
         # experiment to learn sgd
@@ -255,6 +314,8 @@ class FunctionWorld(World):
                 self.Func = SimpleNNFunction(**kwargs)
             elif 'func' not in kwargs or kwargs['func'] == 'quad':
                 self.Func = QuadraticFunction(**kwargs)
+            elif 'func' not in kwargs or kwargs['func'] == 'logistic':
+                self.Func = LogisticFunction(**kwargs)
             elif 'func' not in kwargs or kwargs['func'] == 'mnist':
                 self.Func = MNISTFunction(**kwargs)
         self.variables = self.Func.variables
@@ -277,17 +338,25 @@ class FunctionWorld(World):
         
         self.sess = tf.Session()
 
+        if self.kwargs['plot']:
+            self.learning_curve = []
+
     def reset(self):
         self.episode_counter += 1
         if self.stop_thres > self.base_stop_thres * 0.01:
-            self.stop_thres *= 0.999
+            self.stop_thres *= 0.9999
         self.step_counter = 0
         #tf.reset_default_graph() #??????????????????????
         self.sess.run(tf.initialize_all_variables())
+        self.Func.init_data()
+        #print self.Func.y
         feed = self.Func.gen_feed()
         state, value = self.sess.run([self.state, self.loss], feed_dict=feed)
         self.last_value = value
         self.init_value = value
+        if self.kwargs['plot']:
+            self.learning_curve = []
+            plt.clf()
         return state
 
     def eps_end(self):
@@ -300,29 +369,26 @@ class FunctionWorld(World):
         return ee
 
     def step(self, action):
-        feed = self.Func.gen_feed()
-        feed.update({self.t_action: action})
-        #feed.update({self.t_action: np.full(self.num_vars, 0.01)})
-        self.sess.run(self.train_op, feed_dict=feed)
-        #self.sess.run(self.train_op, feed_dict={self.t_action: np.full(self.num_vars, 0.1)})
-        state, value, grad_scale = self.sess.run([self.state, self.loss, self.grad_scale], feed_dict=feed)
-        #print value, grad_scale
+        state, value, grad_scale = self.Func.step(self.sess, action)
+        if self.kwargs['plot']:
+            self.learning_curve.append(value)
 
         inc = (self.last_value - value)
         self.last_value = value
         #print "grad_scale: %f, value: %f" % (grad_scale, value)
         info = True
-        if self.kwargs['func'] != 'mnist':
+        #if self.kwargs['func'] not in ['mnist', 'logistic']:
+        if self.kwargs['action'] != 'params':
             if grad_scale < self.stop_thres:
                 done = True
-                reward = inc + self.init_value - value
-                #reward = inc
-                print value, reward, grad_scale, self.stop_thres
+                #reward = inc + self.init_value - value
+                reward = inc
+                #print value, reward, grad_scale, self.stop_thres
             elif value - self.init_value > 500:
                 done = True
-                reward = - 1000
+                #reward = - 1000
                 #done = False
-                #reward = inc
+                reward = inc
                 info = False # abnormal exit
             else:
                 done = False
@@ -333,13 +399,26 @@ class FunctionWorld(World):
                 reward = inc
             elif value - self.init_value > 50:
                 done = True
-                reward = - 1000
+                #reward = - 1000
+                reward = inc
                 info = False # abnormal exit
             else:
                 done = False
                 reward = inc
-            if self.step_counter % 100 == 0:
+            #reward *= np.exp(1.0 * (self.init_value - value))
+            if self.step_counter % 100 == 0 and self.kwargs['action'] == 'params':
                 print value, reward, grad_scale, self.step_counter, action
+        if (done and self.kwargs['plot']) and self.step_counter >= self.kwargs['max_iter'] - 1:
+            #window_size = 5
+            #window = np.ones(int(window_size))/float(window_size)
+            #learning_curve_smooth = np.convolve(self.learning_curve, window)
+            learning_curve_smooth = self.learning_curve
+            plt.plot(learning_curve_smooth)
+            plt.ylabel('loss function')
+            plt.xlabel('number of iterations')
+            plt.savefig(self.kwargs['save_dir'])
+            print "save learning curve to %s" % self.kwargs['save_dir']
+            plt.clf()
         '''
         done = grad_scale < self.stop_thres
         #reward = inc / grad_scale if not done else inc / grad_scale - self.step_counter

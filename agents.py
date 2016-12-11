@@ -520,7 +520,13 @@ class DDPGAgent(PGAgent):
                 print g.get_shape(), tvars[i].get_shape(), tvars[i].name
             else:
                 print None, tvars[i].get_shape(), tvars[i].name
-        self.train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        #actor_grad_scale = 0.00
+        actor_grad_scale = 1.0
+        self.train_op = optimizer.apply_gradients([(actor_grad_scale * g 
+            if 'actor' in v.name else g, v) 
+            for g, v in zip(grads, tvars)], global_step=self.global_step)
+        #self.train_op = optimizer.apply_gradients([(0.0 * g, v) 
+        #    for g, v in zip(grads, tvars)], global_step=self.global_step)
 
     def gen_feed(self):
         batch_indices = np.random.randint(0, self.acc_memory_size, self.config['batch_size'])
@@ -583,7 +589,6 @@ class DDPGAgent(PGAgent):
         # learn from experiences
         feed = self.gen_feed()
         #print [v.name for v in feed]
-        sys.exit()
         _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed)
         self.update_target()
 
@@ -645,6 +650,8 @@ class DDPGContAgent(DDPGAgent):
                 tf.cast(tf.floordiv(self.global_step, self.config["anneal_step_lr"]), 
                     tf.float32)), self.config["min_lr"])
 
+        #self.config['estimator_params']['policy_network']['trainable'] = self.config['trainable']
+        #self.config['estimator_params']['critic_network']['trainable'] = self.config['trainable']
         self.actor = Estimator(self.config['estimator_params']
                 ['policy_network']['name']).get_estimator(
                 inputs=self.t_state, num_out=np.prod(self.action_dim), 
@@ -657,9 +664,16 @@ class DDPGContAgent(DDPGAgent):
         #self.action_scale = 1e-3
         self.action_scale = 1
         self.actor *= self.action_scale
-        self.critic = Estimator(self.config['estimator_params']
-                ['value_network']['name']).get_estimator(
+
+        value_network_estimator = Estimator(self.config['estimator_params']
+                ['value_network']['name'])
+        self.critic = value_network_estimator.get_estimator(
                 inputs=self.t_state, actions=self.t_action, num_out=1, 
+                scope='critic', 
+                **self.config['estimator_params']['value_network'])
+
+        self.critic_with_actor = value_network_estimator.get_estimator(
+                inputs=self.t_state, actions=self.actor, num_out=1, 
                 scope='critic', 
                 **self.config['estimator_params']['value_network'])
 
@@ -681,7 +695,7 @@ class DDPGContAgent(DDPGAgent):
         critic_target_config['trainable'] = False
         self.critic_target = Estimator(self.config['estimator_params']
                 ['value_network']['name']).get_estimator(
-                inputs=self.t_state_new, actions=self.action_sampler_deterministic, num_out=1, 
+                inputs=self.t_state_new, actions=self.actor_target, num_out=1, 
                 scope='critic_target',
                 **critic_target_config)
 
@@ -712,17 +726,48 @@ class DDPGContAgent(DDPGAgent):
             self.target_update_ops.append(critic_target_variables[k].assign(
                 tau * v + (1.0 - tau) * critic_target_variables[k]))
 
-        self.actor_loss = tf.reduce_mean(self.critic_target)
+        self.actor_loss = -tf.reduce_mean(self.critic_with_actor)
         self.target = tf.reshape(self.t_reward, \
                 [-1] + [1] * (self.critic.get_shape().ndims - 1))\
                 + self.config["discount_rate"] * self.critic_target
-        self.critic_loss = tf.reduce_mean(self.target - self.critic)
+        self.critic_loss = tf.reduce_mean(tf.square(self.target - self.critic))
+        #print self.critic_target.get_shape(), self.target.get_shape(), self.critic.get_shape()
 
         self.add_reg(actor_variables.values())
         self.add_reg(critic_variables.values())
         self.loss = (self.actor_loss + self.critic_loss)
         self.loss += self.reg_loss
-        self.build_train()
+        if self.learning:
+            self.build_train()
+
+    def build_train(self):
+        #optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate,
+        #        decay=0.9)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
+        tvars = [v for v in self.loss.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+                if not v.name.startswith('World')]
+        tvars_actor = [v for v in tvars if 'actor' in v.name]
+        tvars_critic = [v for v in tvars if 'critic' in v.name]
+        tvars = tvars_actor + tvars_critic
+        grads = tf.gradients(self.actor_loss, tvars_actor) + tf.gradients(self.critic_loss, tvars_critic)
+        if self.config["clip_norm"] <= 0:
+            grads = tf.gradients(self.loss, tvars)
+        else:
+            grads, norm = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), self.config["clip_norm"])
+            print self.loss, self.loss.get_shape(), len(tvars), type(self.loss)
+        for i, g in enumerate(grads):
+            if g is not None:
+                print g.get_shape(), tvars[i].get_shape(), tvars[i].name
+            else:
+                print None, tvars[i].get_shape(), tvars[i].name
+        #actor_grad_scale = 0.00
+        #actor_grad_scale = 1
+        actor_grad_scale = self.config.get('policy_gradient_scale', 1)
+        self.train_op = optimizer.apply_gradients([(actor_grad_scale * g 
+            if 'actor' in v.name else g, v) 
+            for g, v in zip(grads, tvars)], global_step=self.global_step)
+        #self.train_op = optimizer.apply_gradients([(0.0 * g, v) 
+        #    for g, v in zip(grads, tvars)], global_step=self.global_step)
 
     def update(self):
         # learn from experiences
@@ -733,6 +778,7 @@ class DDPGContAgent(DDPGAgent):
             if type(v) == list:
                 print v[0].shape, len(v)
         sys.exit(0)
+        print feed[self.t_reward]
         '''
         _, loss, global_step = self.sess.run([self.train_op, self.loss, self.global_step], feed_dict=feed)
         #print actor.shape

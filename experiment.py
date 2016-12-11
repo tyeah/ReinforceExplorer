@@ -4,13 +4,16 @@ from agents import init_agent
 from worlds import init_world
 from collections import deque
 
+np.random.seed(1)
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-g', '--gpu', type=str, default='-1')
 parser.add_argument('-c', '--config', type=str, default='configs/ddpgcont_func.json')
 parser.add_argument('-w', '--weights', type=str, default=None)
 parser.add_argument('-s', '--save_dir', type=str, default=None)
 parser.add_argument('-r', '--render', action='store_true', default=False)
-parser.add_argument('-l', '--learning', action='store_true', default=True)
+parser.add_argument('-f', '--fixed', action='store_true', default=False)
+parser.add_argument('-p', '--plot', action='store_true', default=False)
 args = parser.parse_args()
 
 if float(args.gpu) > 0:
@@ -18,7 +21,7 @@ if float(args.gpu) > 0:
 config = json.load(open(args.config))
 print('loaded config file: %s' % args.config)
 render = args.render
-learning = args.learning
+learning = not args.fixed
 
 if args.save_dir is None:
     args.save_dir = 'weights/' + os.path.basename(os.path.splitext(args.config)[0])
@@ -30,6 +33,8 @@ config['save_dir'] = args.save_dir
 
 if 'env_config' not in config:
     config['env_config'] = {}
+config['env_config']['plot'] = args.plot
+config['env_config']['save_dir'] = args.save_dir + '/learning_curve.pdf'
 env = init_world(config['env'], **config['env_config'])
 
 MAX_EPISODES = config['MAX_EPISODES']
@@ -52,10 +57,11 @@ try:
 
         agent.init_state(state)
         acc_rewards = 0
+        log_file.write('episode_%d\n' % i_eps)
         for t in xrange(MAX_STEPS):
             if render: env.render()
             #action = agent.action()
-            #action = agent.action() * 0.001
+            #action = agent.action() * 0.1
             action = agent.action() * action_multiplier
             #print action
             #print action.shape, type(action)
@@ -65,7 +71,7 @@ try:
             #print state
             #sys.exit()
             #action = 0.001 * state.reshape(-1)
-            #action = [0.01]
+            #action = [0.1]
             next_state, reward, done, info = env.step(action)
             #print env.last_value
             #print reward, done, action
@@ -73,6 +79,7 @@ try:
             #reward = -10 if done else 0.1
             #reward = 5.0 if done else -0.1
             agent.experience(next_state, reward, done)
+            log_file.write('%f\n' % env.last_value)
             if done: break
 
         final_value = env.last_value
@@ -88,7 +95,7 @@ try:
             no_reward_since = 0
         avg_rewards.append(acc_rewards)
         print("episode %d, episode reward: %f, mean reward: %f, num steps: %d, final value: %f" % (i_eps, acc_rewards, np.mean(avg_rewards), t + 1, env.last_value))
-        log_file.write('%f\n' % np.mean(avg_rewards))
+        #log_file.write('%f\n' % np.mean(avg_rewards)) ######################
 except KeyboardInterrupt:
     print('KeyboardInterrupt')
     log_file.close()
