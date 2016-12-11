@@ -1,6 +1,6 @@
 # async_deep_reinforce
 
-Asynchronous deep reinforcement learning
+Asynchronous deep reinforcement learning (forked from https://github.com/miyosuda/async_deep_reinforce)
 
 ## About
 
